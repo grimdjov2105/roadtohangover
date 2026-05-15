@@ -2081,6 +2081,9 @@ function enterAdminMode(){
   if(rs)rs.classList.remove('show');
   S.mode='admin';
   S.view='library';
+  // Générer un nouveau code room à chaque connexion admin
+  S.roomCode=Math.random().toString(36).substring(2,8).toUpperCase();
+  try{localStorage.setItem(RK,S.roomCode);}catch(e){}
   startFirestoreSync();
   resetLockTimer();
   render();
