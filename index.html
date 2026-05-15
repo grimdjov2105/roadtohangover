@@ -2174,14 +2174,25 @@ function shareWhatsApp(){
   });
 }
 function generateShortCode(){
+  // Toujours générer un nouveau code room
+  S.roomCode=Math.random().toString(36).substring(2,8).toUpperCase();
+  try{localStorage.setItem(RK,S.roomCode);}catch(e){}
+  S.shortCode='';S.shortLink='';
   var btn=document.getElementById('btn-gen-code');
-  if(btn){btn.innerHTML='...';btn.disabled=true;}
-  getSessionURL().then(function(url){
-    if(!url){if(btn){btn.innerHTML='✨ Generer code session';btn.disabled=false;}return;}
-    S.shortCode='';S.shortLink=url;
-    try{localStorage.removeItem('rth-short-code');localStorage.setItem('rth-short-link',url);}catch(e){}
+  if(btn){btn.innerHTML='⏳...';btn.disabled=true;}
+  saveRoomToFirestore(S.roomCode).then(function(){
+    var url=getRoomURL();
+    S.shortLink=url;
+    try{localStorage.setItem('rth-short-link',url);}catch(e){}
+    render();
     navigator.clipboard.writeText(url)
-      .then(function(){render();showToast('Lien copie ! Partage via WhatsApp ou QR code.');}).catch(function(){render();showToast('Lien pret. Utilise WhatsApp ou QR.');});
+      .then(function(){showToast('✅ Nouveau code : '+S.roomCode+' — Lien copié !');})
+      .catch(function(){showToast('✅ Nouveau code : '+S.roomCode);});
+  }).catch(function(){
+    var url=getRoomURL();
+    S.shortLink=url;
+    render();
+    showToast('✅ Code : '+S.roomCode);
   });
 }
 function checkVisitorJoin(){
@@ -2672,17 +2683,19 @@ function renderRoom(){
       +actionBtns
     +'</div>';
   })();
-  var shortCodeHtml=S.shortCode
+  var shortCodeHtml=S.roomCode
     ?'<div style="background:rgba(100,255,218,0.07);border:2px solid rgba(100,255,218,0.25);border-radius:14px;padding:14px;margin-bottom:10px;text-align:center">'
       +'<div style="font-size:10px;font-weight:900;letter-spacing:1px;color:#64FFDA;margin-bottom:6px">CODE VISITEURS</div>'
-      +'<div style="font-size:40px;font-weight:900;letter-spacing:10px;color:#FF8C00;margin-bottom:4px;font-family:monospace">'+esc(S.shortCode)+'</div>'
+      +'<div style="font-size:44px;font-weight:900;letter-spacing:10px;color:#FF8C00;margin-bottom:4px;font-family:monospace">'+esc(S.roomCode)+'</div>'
       +'<div style="font-size:10px;color:rgba(200,230,220,0.35);margin-bottom:10px">Les membres tapent ce code dans l\'app</div>'
-      +'<div style="display:flex;gap:6px">'
-        +'<button onclick="navigator.clipboard.writeText(S.shortCode).then(function(){showToast(\'Code copie ! \'+S.shortCode);})" style="flex:1;padding:9px;border-radius:9px;border:1px solid rgba(100,255,218,0.2);background:rgba(100,255,218,0.06);color:#64FFDA;font-size:11px;font-weight:700;cursor:pointer">📋 Copier code</button>'
-        +'<button onclick="copySessionLink()" style="flex:1;padding:9px;border-radius:9px;border:1px solid rgba(255,140,0,0.2);background:rgba(255,140,0,0.06);color:#FF8C00;font-size:11px;font-weight:700;cursor:pointer">&#128279; Copier lien</button>'
+      +'<div style="display:flex;gap:6px;margin-bottom:8px">'
+        +'<button onclick="navigator.clipboard.writeText(S.roomCode).then(function(){showToast(\'✅ Code copié : \'+S.roomCode);})" style="flex:1;padding:9px;border-radius:9px;border:1px solid rgba(100,255,218,0.2);background:rgba(100,255,218,0.06);color:#64FFDA;font-size:11px;font-weight:700;cursor:pointer">📋 Copier code</button>'
+        +'<button onclick="copySessionLink()" style="flex:1;padding:9px;border-radius:9px;border:1px solid rgba(255,140,0,0.2);background:rgba(255,140,0,0.06);color:#FF8C00;font-size:11px;font-weight:700;cursor:pointer">🔗 Lien</button>'
+        +'<button onclick="showQRModal(S.roomCode)" style="flex:1;padding:9px;border-radius:9px;border:1px solid rgba(100,255,218,0.2);background:rgba(100,255,218,0.06);color:#64FFDA;font-size:11px;font-weight:700;cursor:pointer">📲 QR</button>'
       +'</div>'
+      +'<button onclick="generateShortCode()" style="width:100%;padding:8px;border-radius:9px;border:1px solid rgba(255,100,100,0.2);background:rgba(255,100,100,0.06);color:#FF6B6B;font-size:11px;font-weight:700;cursor:pointer">🔄 Nouveau code</button>'
     +'</div>'
-    :'<button id="btn-gen-code" onclick="generateShortCode()" style="width:100%;padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,#64FFDA,#00B894);color:#0a1628;font-weight:900;font-size:14px;cursor:pointer;margin-bottom:10px">✨ Generer code session</button>';
+    :'<button id="btn-gen-code" onclick="generateShortCode()" style="width:100%;padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,#64FFDA,#00B894);color:#0a1628;font-weight:900;font-size:14px;cursor:pointer;margin-bottom:10px">✨ Générer code session</button>';
   var sessionCodeHtml=S.roomCode
     ?timerAdminHtml
       +shortCodeHtml
