@@ -532,11 +532,9 @@ function startFirestoreSync(){
     // -- Sync performance admin → visiteurs --
     if(S.mode!=='admin'&&S.guestSession){
       if(data.perfActive===true&&typeof data.perfIndex==='number'){
-        // Charger les songs guests depuis le guestSession
         if(S.guestSession.songs)S.guestPerfSongs=S.guestSession.songs;
-        handleGuestPerfSync(data.perfIndex);
+        handleGuestPerfSync(data.perfIndex, data.sessionStartTime, data.freeHours);
       } else if(data.perfActive===false){
-        // Admin a stoppé la perf
         if(document.getElementById('perf-mode').classList.contains('show')){
           exitPerf();
           showToast('🎤 Performance terminée');
@@ -1065,15 +1063,28 @@ function startGuestPerf(startIdx){
 }
 
 function startPerf(){
-  if(S.setlist.length===0)return showToast('Ajoute au moins une chanson à la setlist');
+  if(S.setlist.length===0)return showToast('Ajoute au moins une chanson à la setlist !');
+  // 1. Lancer le timer si pas déjà actif
+  var now=Date.now();
+  var freeMs=(S.freeHours||2)*3600*1000;
+  var alreadyRunning=S.sessionStartTime>0&&(now-S.sessionStartTime)<freeMs;
+  if(!alreadyRunning){
+    S.sessionStartTime=now;
+    try{
+      localStorage.setItem('rth-session-start-admin',String(S.sessionStartTime));
+      localStorage.setItem('rth-free-hours',String(S.freeHours||2));
+    }catch(e){}
+  }
+  // 2. Ouvrir la performance admin directement
   S.perfIndex=0; PF.elapsed=0; PF.idx=-1; PF.words=[];
   if(PF.countTimer){clearTimeout(PF.countTimer);PF.countTimer=null;}
   var ov=document.getElementById('perf-overlay');
   if(ov)ov.classList.remove('show');
   document.getElementById('perf-mode').classList.add('show');
   loadPerfSong(false);
-  // Sync Firestore → les visiteurs suivent automatiquement
+  // 3. Sync Firestore → visiteurs : timer + performance + chansons débloquées
   syncPerfState(true);
+  showToast('🎤 Performance lancée — '+S.setlist.length+' chansons · '+(S.freeHours||2)+'H chrono !');
 }
 function perfNext(){
   if(S.inGuestPerf){
@@ -1154,20 +1165,37 @@ function syncPerfState(active){
   var perfData={
     perfActive:active,
     perfIndex:active?S.perfIndex:0,
-    perfChangedAt:Date.now()
+    perfChangedAt:Date.now(),
+    // Timer session inclus → visiteurs savent que chansons sont débloquées
+    sessionStartTime:S.sessionStartTime||0,
+    freeHours:S.freeHours||2
   };
   _fbDoc.update(perfData).catch(function(){
-    // Si doc n'existe pas encore, on set
     _fbDoc.set(Object.assign({
       songs:S.songs,setlist:S.setlist,
-      sessions:S.sessions,activeSession:S.activeSession,
-      sessionStartTime:S.sessionStartTime||0,freeHours:S.freeHours||2
+      sessions:S.sessions,activeSession:S.activeSession
     },perfData)).catch(function(){});
   });
+  // Sync aussi dans rooms (pour visiteurs qui rejoignent en cours)
+  if(S.roomCode){
+    _fbDB.collection('rooms').doc(S.roomCode).update({
+      perfActive:active,
+      perfIndex:active?S.perfIndex:0,
+      sessionStartTime:S.sessionStartTime||0,
+      freeHours:S.freeHours||2
+    }).catch(function(){});
+  }
 }
 
 // -- VISITEUR : RÉCEPTION CHANGEMENT CHANSON ADMIN --
-function handleGuestPerfSync(perfIndex){
+function handleGuestPerfSync(perfIndex, sessionStartTime, freeHours){
+  // Mettre à jour le timer de session → débloque les chansons
+  if(sessionStartTime&&sessionStartTime>0){
+    if(S.guestSession){
+      S.guestSession.sessionStartTime=sessionStartTime;
+      S.guestSession.freeHours=freeHours||2;
+    }
+  }
   // Ouvrir la performance si pas encore ouverte
   if(!document.getElementById('perf-mode').classList.contains('show')){
     var gs=S.guestSession;
@@ -1180,7 +1208,6 @@ function handleGuestPerfSync(perfIndex){
     var ov=document.getElementById('perf-overlay');
     if(ov)ov.classList.remove('show');
     document.getElementById('perf-mode').classList.add('show');
-    // Cacher boutons navigation visiteur
     var prevBtn=document.getElementById('perf-prev-btn');
     var nextBtn=document.getElementById('perf-next-btn');
     if(prevBtn)prevBtn.style.display='none';
@@ -1188,7 +1215,7 @@ function handleGuestPerfSync(perfIndex){
     var autoBtn=document.getElementById('perf-auto-btn');
     if(autoBtn)autoBtn.style.display='none';
     loadPerfSong(true);
-    showToast('🎸 Performance lancée par l\'admin !');
+    showToast('🎸 Performance lancée — accès débloqué !');
   } else {
     // Changer de chanson si l'index a changé
     if(S.guestPerfIndex!==perfIndex){
@@ -1415,7 +1442,7 @@ function renderGuest(){
 
   var cards=songs.map(function(sg,i){
     var locked=freeExpired;
-    return '<div class="guest-song-card" style="animation-delay:'+(i*0.05)+'s;'+(locked?'opacity:0.5;':'')+'cursor:'+(locked?'default':'pointer')+'" '+(locked?'onclick="showDonModal()"':'onclick="startGuestPerf('+i+')"')+'>'
+    return '<div class="guest-song-card" style="animation-delay:'+(i*0.05)+'s;opacity:'+(locked?'0.5':'1')+';cursor:default">'
       +'<div style="display:flex;align-items:center;gap:10px">'
         +'<div style="width:28px;height:28px;border-radius:50%;background:'+(locked?'rgba(255,100,100,0.15)':'rgba(100,255,218,0.15)')+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:'+(locked?'#FF6B6B':'#64FFDA')+';flex-shrink:0">'+(locked?'🔒':i+1)+'</div>'
         +'<div class="song-thumb" style="background:linear-gradient(135deg,'+cc(sg.key||'G')+',rgba(0,0,0,0.4));width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;color:#fff;flex-shrink:0">'+esc(sg.key||'?')+'</div>'
@@ -1423,9 +1450,7 @@ function renderGuest(){
           +'<div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(sg.title)+'</div>'
           +'<div style="font-size:11px;color:rgba(200,230,220,0.4)">'+esc(sg.artist)+'</div>'
         +'</div>'
-        +(locked
-          ?''
-          :'<span style="padding:5px 10px;border-radius:20px;background:rgba(100,255,218,0.1);border:1px solid rgba(100,255,218,0.3);color:#64FFDA;font-size:11px;font-weight:700">▶ Jouer</span>')
+        +'<span style="padding:5px 10px;border-radius:20px;background:rgba(100,255,218,0.05);border:1px solid rgba(100,255,218,0.15);color:rgba(100,255,218,0.3);font-size:11px;font-weight:700">'+(locked?'🔒':'⏳')+'</span>'
       +'</div>'
     +'</div>';
   }).join('');
@@ -1441,9 +1466,9 @@ function renderGuest(){
     :'<div style="background:rgba(100,255,218,0.06);border:1px solid rgba(100,255,218,0.25);border-radius:14px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">'
       +'<div>'
         +'<div style="font-size:10px;font-weight:900;letter-spacing:1px;color:#64FFDA;margin-bottom:2px">🎵 SESSION EN COURS</div>'
-        +'<div style="font-size:11px;color:rgba(200,230,220,0.4)">Toutes les paroles disponibles gratuitement</div>'
+        +'<div style="font-size:11px;color:rgba(200,230,220,0.4)">En attente de l\'admin pour lancer la musique...</div>'
       +'</div>'
-      +'<div id="guest-free-timer" style="font-size:19px;font-weight:900;color:#64FFDA;font-family:monospace;letter-spacing:2px">'+timerStr+'</div>'
+      +'<div style="font-size:22px">🎸</div>'
     +'</div>';
 
   return '<div style="background:linear-gradient(135deg,rgba(255,140,0,0.1),rgba(100,255,218,0.05));border:1px solid rgba(255,140,0,0.2);border-radius:18px;padding:16px;margin-bottom:14px">'
@@ -1918,22 +1943,8 @@ setInterval(function(){
       adminTimer.textContent=(h2>0?h2+'h ':'')+('0'+m2).slice(-2)+'m '+('0'+s2).slice(-2)+'s';
     } else if(S.view==='room'){render();}
   }
-  // Rafraichir le timer acces gratuit session visiteur
-  if(S.guestSession&&S.guestSession._sessionStart){
-    var freeMs=(S.guestSession.freeHours||2)*3600000;
-    var timeLeft=Math.max(0,freeMs-(now-S.guestSession._sessionStart));
-    var freeExpired=timeLeft===0;
-    var el2=document.getElementById('guest-free-timer');
-    if(el2&&!freeExpired){
-      var tlH=Math.floor(timeLeft/3600000);
-      var tlM=Math.floor((timeLeft%3600000)/60000);
-      var tlS=Math.floor((timeLeft%60000)/1000);
-      el2.textContent=(tlH>0?tlH+'h ':'')+('0'+tlM).slice(-2)+'m '+('0'+tlS).slice(-2)+'s';
-    } else if(freeExpired&&S.view==='guest'){
-      // Acces expire : re-render pour afficher le paywall
-      render();
-    }
-  }
+  // Rafraichir le timer acces gratuit session visiteur — timer masqué côté visiteur
+  // (l'expiration est gérée par Firestore sessionStartTime)
 },1000); // toutes les secondes pour le timer
 
 // ==========================================
@@ -2639,49 +2650,19 @@ function renderRoom(){
     var tlM=Math.floor((timeLeft%3600000)/60000);
     var tlS=Math.floor((timeLeft%60000)/1000);
     var timerStr=(tlH>0?(tlH+'h '):'')+(('0'+tlM).slice(-2))+'m '+(('0'+tlS).slice(-2))+'s';
-    var startStr=active?new Date(S.sessionStartTime).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}):'--:--';
     var endStr=active?new Date(S.sessionStartTime+freeMs).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}):'--:--';
-    var c1=S.freeHours===1?'#64FFDA':'rgba(200,230,220,0.35)';
-    var c2=S.freeHours===2?'#FF8C00':'rgba(200,230,220,0.35)';
-    var c3=S.freeHours===3?'#64FFDA':'rgba(200,230,220,0.35)';
-    var c4=S.freeHours===4?'#FF4081':'rgba(200,230,220,0.35)';
-    var b1=S.freeHours===1?'rgba(100,255,218,0.12)':'rgba(100,255,218,0.03)';
-    var b2=S.freeHours===2?'rgba(255,140,0,0.12)':'rgba(255,140,0,0.03)';
-    var b3=S.freeHours===3?'rgba(100,255,218,0.12)':'rgba(100,255,218,0.03)';
-    var b4=S.freeHours===4?'rgba(255,64,129,0.12)':'rgba(255,64,129,0.03)';
-    var d1=S.freeHours===1?'#64FFDA':'rgba(100,255,218,0.2)';
-    var d2=S.freeHours===2?'#FF8C00':'rgba(255,140,0,0.2)';
-    var d3=S.freeHours===3?'#64FFDA':'rgba(100,255,218,0.2)';
-    var d4=S.freeHours===4?'#FF4081':'rgba(255,64,129,0.2)';
-    var durBtns='<div style="display:flex;gap:6px;margin-bottom:8px">'
-      +'<button onclick="startAdminTimer(1)" style="flex:1;padding:10px;border-radius:9px;border:2px solid '+d1+';background:'+b1+';color:'+c1+';font-weight:900;font-size:14px;cursor:pointer">1H</button>'
-      +'<button onclick="startAdminTimer(2)" style="flex:1;padding:10px;border-radius:9px;border:2px solid '+d2+';background:'+b2+';color:'+c2+';font-weight:900;font-size:14px;cursor:pointer">2H</button>'
-      +'<button onclick="startAdminTimer(3)" style="flex:1;padding:10px;border-radius:9px;border:2px solid '+d3+';background:'+b3+';color:'+c3+';font-weight:900;font-size:14px;cursor:pointer">3H</button>'
-      +'<button onclick="startAdminTimer(4)" style="flex:1;padding:10px;border-radius:9px;border:2px solid '+d4+';background:'+b4+';color:'+c4+';font-weight:900;font-size:14px;cursor:pointer">4H</button>'
-    +'</div>';
-    var statusLine=running
-      ?'<div style="background:rgba(100,255,218,0.06);border:1px solid rgba(100,255,218,0.2);border-radius:10px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+    if(!running&&!expired)return '';
+    return running
+      ?'<div style="background:rgba(100,255,218,0.06);border:1px solid rgba(100,255,218,0.2);border-radius:12px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
           +'<div>'
-            +'<div style="font-size:10px;font-weight:900;color:#64FFDA;letter-spacing:1px">EN COURS '+S.freeHours+'H</div>'
-            +'<div style="font-size:10px;color:rgba(200,230,220,0.4)">'+startStr+' Fin '+endStr+'</div>'
+            +'<div style="font-size:10px;font-weight:900;color:#64FFDA;letter-spacing:1px">🟢 SESSION EN COURS · '+S.freeHours+'H</div>'
+            +'<div style="font-size:10px;color:rgba(200,230,220,0.4)">Fin à '+endStr+' · <button onclick="stopAdminTimer()" style="border:none;background:none;color:#FF6B6B;font-size:10px;font-weight:700;cursor:pointer;padding:0">■ Terminer</button></div>'
           +'</div>'
-          +'<div id="admin-free-timer" style="font-size:20px;font-weight:900;color:#64FFDA;font-family:monospace">'+timerStr+'</div>'
+          +'<div id="admin-free-timer" style="font-size:22px;font-weight:900;color:#64FFDA;font-family:monospace">'+timerStr+'</div>'
         +'</div>'
-      :expired
-      ?'<div style="background:rgba(255,100,100,0.08);border:1px solid rgba(255,100,100,0.25);border-radius:10px;padding:8px 12px;text-align:center;margin-bottom:8px">'
-          +'<div style="font-size:12px;font-weight:900;color:#FF6B6B">&#128274; Acces expire '+startStr+' - '+endStr+'</div>'
-        +'</div>'
-      :'<div style="font-size:11px;color:rgba(200,230,220,0.4);text-align:center;margin-bottom:8px">Choisis la duree puis clique Commencer</div>';
-    var actionBtns='<div style="display:flex;gap:6px">'
-      +'<button onclick="startAdminTimer(S.freeHours)" style="flex:2;padding:11px;border-radius:10px;border:none;background:linear-gradient(135deg,#64FFDA,#00B894);color:#0a1628;font-weight:900;font-size:13px;cursor:pointer">&#9654; Commencer</button>'
-      +'<button onclick="stopAdminTimer()" style="flex:1;padding:11px;border-radius:10px;border:1px solid rgba(255,100,100,0.35);background:rgba(255,100,100,0.1);color:#FF6B6B;font-weight:900;font-size:13px;cursor:pointer">&#9632; Fin</button>'
-    +'</div>';
-    return '<div style="background:rgba(10,22,40,0.6);border:1.5px solid rgba(100,255,218,0.15);border-radius:14px;padding:14px;margin-bottom:10px">'
-      +'<div style="font-size:10px;font-weight:900;letter-spacing:1px;color:rgba(200,230,220,0.4);margin-bottom:10px">&#9200; COMPTE A REBOURS ACCES GRATUIT</div>'
-      +durBtns
-      +statusLine
-      +actionBtns
-    +'</div>';
+      :'<div style="background:rgba(255,100,100,0.08);border:1px solid rgba(255,100,100,0.25);border-radius:12px;padding:10px 14px;text-align:center;margin-bottom:10px">'
+          +'<div style="font-size:12px;font-weight:900;color:#FF6B6B">🔒 Session expirée — Lance une nouvelle performance</div>'
+        +'</div>';
   })();
   var shortCodeHtml=S.roomCode
     ?'<div style="background:rgba(100,255,218,0.07);border:2px solid rgba(100,255,218,0.25);border-radius:14px;padding:14px;margin-bottom:10px;text-align:center">'
@@ -2724,7 +2705,16 @@ function renderRoom(){
         :'')
     :'<button class="btn-primary btn-teal" onclick="createRoom()">🌊 Créer une Session</button>';
   var perfBtn=ssl.length>0
-    ?'<button onclick="startPerf()" style="width:100%;padding:16px;border-radius:14px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-weight:900;font-size:15px;cursor:pointer;letter-spacing:1px;margin-bottom:16px">🎤 LANCER LA PERFORMANCE</button>'
+    ?'<div style="margin-bottom:16px">'
+      +'<div style="font-size:10px;font-weight:900;letter-spacing:1px;color:rgba(200,230,220,0.4);margin-bottom:8px;text-align:center">DURÉE DE LA SESSION GRATUITE</div>'
+      +'<div style="display:flex;gap:6px;margin-bottom:10px">'
+        +'<button onclick="S.freeHours=1;render()" style="flex:1;padding:10px;border-radius:9px;border:2px solid '+(S.freeHours===1?'#64FFDA':'rgba(100,255,218,0.2)')+';background:'+(S.freeHours===1?'rgba(100,255,218,0.12)':'rgba(100,255,218,0.03)')+';color:'+(S.freeHours===1?'#64FFDA':'rgba(200,230,220,0.35)')+';font-weight:900;font-size:14px;cursor:pointer">1H</button>'
+        +'<button onclick="S.freeHours=2;render()" style="flex:1;padding:10px;border-radius:9px;border:2px solid '+(S.freeHours===2?'#FF8C00':'rgba(255,140,0,0.2)')+';background:'+(S.freeHours===2?'rgba(255,140,0,0.12)':'rgba(255,140,0,0.03)')+';color:'+(S.freeHours===2?'#FF8C00':'rgba(200,230,220,0.35)')+';font-weight:900;font-size:14px;cursor:pointer">2H</button>'
+        +'<button onclick="S.freeHours=3;render()" style="flex:1;padding:10px;border-radius:9px;border:2px solid '+(S.freeHours===3?'#64FFDA':'rgba(100,255,218,0.2)')+';background:'+(S.freeHours===3?'rgba(100,255,218,0.12)':'rgba(100,255,218,0.03)')+';color:'+(S.freeHours===3?'#64FFDA':'rgba(200,230,220,0.35)')+';font-weight:900;font-size:14px;cursor:pointer">3H</button>'
+        +'<button onclick="S.freeHours=4;render()" style="flex:1;padding:10px;border-radius:9px;border:2px solid '+(S.freeHours===4?'#FF4081':'rgba(255,64,129,0.2)')+';background:'+(S.freeHours===4?'rgba(255,64,129,0.12)':'rgba(255,64,129,0.03)')+';color:'+(S.freeHours===4?'#FF4081':'rgba(200,230,220,0.35)')+';font-weight:900;font-size:14px;cursor:pointer">4H</button>'
+      +'</div>'
+      +'<button onclick="startPerf()" style="width:100%;padding:18px;border-radius:14px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-weight:900;font-size:16px;cursor:pointer;letter-spacing:1px;box-shadow:0 4px 20px rgba(255,140,0,0.3)">🎤 LANCER LA PERFORMANCE '+(S.freeHours||2)+'H</button>'
+    +'</div>'
     :'';
 
   // -- Bloc info déroulant --
