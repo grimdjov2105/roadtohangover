@@ -330,7 +330,8 @@ var EMAILS_REG_KEY = 'rth-emails-reg';
 var AK='rth-admin', PK='rth-price', PIK='rth-payinfo', ULK='rth-unlocked';
 var PPID='rth-ppid', REVK='rth-rev', DEBK='rth-deb', VID='rth-vid', EK='rth-oai-enc';
 var PROFK='rth-profile', WAPPK='rth-wapp', ADMK='rth-adm-hash', MODK='rth-mode';
-var MAX_SONGS=100, MAX_SETLIST=10;
+var MAX_SONGS=100, MAX_SETLIST=15;
+var SESK='rth-sessions';
 
 // -- ID VISITEUR — lié à l'empreinte de l'appareil (non transférable) --
 var VISITOR_ID=(function(){
@@ -414,7 +415,14 @@ var S={
   visitorProfile:null, // {name, email, phone}
   adminWhatsApp:'',
   adminPwdSet:false,
-  inGuestPerf:false, guestPerfIndex:0, guestPerfSongs:[]
+  inGuestPerf:false, guestPerfIndex:0, guestPerfSongs:[],
+  sessions:[
+    {name:'Session 1',setlist:[]},
+    {name:'Session 2',setlist:[]},
+    {name:'Session 3',setlist:[]}
+  ],
+  activeSession:0,
+  editingSession:null
 };
 try{
   var _sv=localStorage.getItem(SK); S.songs=_sv?JSON.parse(_sv):[...DEMO];
@@ -436,6 +444,10 @@ try{
   S.sessionStartTime=parseInt(localStorage.getItem('rth-session-start-admin')||'0')||0;
   S.adminPwdSet=true; // Firebase gère l'auth
   try{var _pr=localStorage.getItem(PROFK);S.visitorProfile=_pr?JSON.parse(_pr):null;}catch(e){}
+  // Charger les sessions pré-enregistrées
+  try{var _ses=localStorage.getItem(SESK);if(_ses){S.sessions=JSON.parse(_ses);}else{S.sessions[0].setlist=S.setlist.slice();}}catch(e){}
+  S.activeSession=parseInt(localStorage.getItem('rth-active-session')||'0')||0;
+  if(S.sessions[S.activeSession])S.setlist=S.sessions[S.activeSession].setlist.slice();
   // Purge des chansons visiteur expirées
   var now=Date.now();
   var before=S.songs.length;
@@ -475,6 +487,11 @@ function startFirestoreSync(){
       S.setlist=data.setlist;
       try{localStorage.setItem(SLK,JSON.stringify(S.setlist));}catch(e){}
     }
+    if(data.sessions&&Array.isArray(data.sessions)){
+      S.sessions=data.sessions;
+      try{localStorage.setItem(SESK,JSON.stringify(S.sessions));}catch(e){}
+    }
+    if(typeof data.activeSession==='number')S.activeSession=data.activeSession;
     if(typeof data.sessionStartTime==='number')S.sessionStartTime=data.sessionStartTime;
     if(typeof data.freeHours==='number')S.freeHours=data.freeHours;
     render();
@@ -529,11 +546,12 @@ startFirestoreSync();
 // -- UTILS --
 function save(){
   try{localStorage.setItem(SK,JSON.stringify(S.songs));}catch(e){}
-  // Sync Firestore si admin connecté
   if(S.mode==='admin'&&_fbAuth.currentUser){
     _fbDoc.set({
       songs:S.songs,
       setlist:S.setlist,
+      sessions:S.sessions,
+      activeSession:S.activeSession,
       sessionStartTime:S.sessionStartTime||0,
       freeHours:S.freeHours||2,
       updatedAt:firebase.firestore.FieldValue.serverTimestamp()
@@ -541,12 +559,17 @@ function save(){
   }
 }
 function saveSL(){
+  // Sync setlist dans la session active
+  S.sessions[S.activeSession]=S.sessions[S.activeSession]||{name:'Session '+(S.activeSession+1),setlist:[]};
+  S.sessions[S.activeSession].setlist=S.setlist.slice();
   try{localStorage.setItem(SLK,JSON.stringify(S.setlist));}catch(e){}
-  // Sync Firestore si admin connecté
+  try{localStorage.setItem(SESK,JSON.stringify(S.sessions));}catch(e){}
   if(S.mode==='admin'&&_fbAuth.currentUser){
     _fbDoc.set({
       songs:S.songs,
       setlist:S.setlist,
+      sessions:S.sessions,
+      activeSession:S.activeSession,
       sessionStartTime:S.sessionStartTime||0,
       freeHours:S.freeHours||2,
       updatedAt:firebase.firestore.FieldValue.serverTimestamp()
@@ -2164,7 +2187,20 @@ function filterLibrary(){
 function renderLibrary(){
   var q=(S.searchQ||'').toLowerCase().trim();
   var prog=(S.songs.length/MAX_SONGS)*360;
-  var badge=S.setlist.length>0?('<span style="background:#FF8C00;color:#0a1628;border-radius:20px;padding:1px 8px;font-size:11px;font-weight:900;margin-left:6px">'+S.setlist.length+'</span>'):'';
+  // Badge : montrer la bonne setlist selon ce qu'on prépare
+  var prepIdx=(S.editingSession!==null&&S.editingSession!==S.activeSession)?S.editingSession:null;
+  var currentSL=prepIdx!==null?S.sessions[prepIdx].setlist:S.setlist;
+  var badge=currentSL.length>0?('<span style="background:#FF8C00;color:#0a1628;border-radius:20px;padding:1px 8px;font-size:11px;font-weight:900;margin-left:6px">'+currentSL.length+'</span>'):'';
+  // Bannière mode préparation
+  var prepBanner=prepIdx!==null
+    ?'<div style="background:rgba(255,140,0,0.1);border:1.5px solid rgba(255,140,0,0.35);border-radius:12px;padding:11px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">'
+        +'<div>'
+          +'<div style="font-size:11px;font-weight:900;color:#FF8C00">📝 PRÉPARE LA SESSION '+(prepIdx+1)+'</div>'
+          +'<div style="font-size:10px;color:rgba(200,230,220,0.4)">Appuie sur 🎵 pour ajouter · '+currentSL.length+'/'+MAX_SETLIST+'</div>'
+        +'</div>'
+        +'<button onclick="stopPreparingSession()" style="padding:7px 12px;border-radius:9px;border:none;background:linear-gradient(135deg,#64FFDA,#00B894);color:#0a1628;font-weight:900;font-size:11px;cursor:pointer">✅ Terminé</button>'
+      +'</div>'
+    :'';
   var filtered=S.songs.filter(function(sg){
     if(!q)return true;
     return (sg.title||'').toLowerCase().includes(q)||(sg.artist||'').toLowerCase().includes(q);
@@ -2181,7 +2217,7 @@ function renderLibrary(){
   var cards=filtered.length===0&&q
     ?'<div style="text-align:center;padding:30px 0;color:rgba(200,230,220,0.3)"><div style="font-size:36px">🔍</div><div style="margin-top:8px;font-size:13px">Aucun résultat pour <span style="color:#FFD700">"'+esc(q)+'"</span></div></div>'
     :filtered.map(function(sg,i){
-      var inSL=S.setlist.includes(sg.id);
+      var inSL=currentSL.includes(sg.id);
       var tempo=sg.tempo||'normal';
       var slBtn='<button onclick="event.stopPropagation();toggleSL(\''+sg.id+'\')" style="padding:4px 8px;border-radius:20px;border:1px solid '+(inSL?'rgba(100,255,218,0.5)':'rgba(255,140,0,0.3)')+';background:'+(inSL?'rgba(100,255,218,0.12)':'rgba(255,140,0,0.08)')+';color:'+(inSL?'#64FFDA':'#FF8C00')+';font-size:11px;font-weight:700;cursor:pointer">'+(inSL?'✅':'🎵')+'</button>';
       var tempoBtn='<button onclick="event.stopPropagation();cycleTempo(\''+sg.id+'\')" class="tempo-mini '+TEMPO_CLASS[tempo]+'" title="Tempo">'+TEMPO_ICON[tempo]+' '+TEMPO_LABEL[tempo]+'</button>';
@@ -2213,6 +2249,7 @@ function renderLibrary(){
     +'<div><div style="font-size:20px;font-weight:900;color:#64FFDA">Ma Playlist</div><div id="lib-count" style="font-size:11px;color:rgba(200,230,220,0.4)">'+subtitle+'</div></div>'
     +'<div style="width:44px;height:44px;border-radius:50%;background:conic-gradient(#64FFDA '+prog+'deg,rgba(100,255,218,0.1) 0deg);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;color:#64FFDA">'+S.songs.length+'</div>'
     +'</div>'
+    +prepBanner
     +'<div style="display:flex;gap:6px;margin-bottom:12px;align-items:center">'
       +'<span style="font-size:10px;color:rgba(200,230,220,0.3);font-weight:700;letter-spacing:1px;flex-shrink:0">TRIER</span>'
       +sBtn('default','Défaut','🔄')
@@ -2419,16 +2456,20 @@ function renderRoom(){
     var c1=S.freeHours===1?'#64FFDA':'rgba(200,230,220,0.35)';
     var c2=S.freeHours===2?'#FF8C00':'rgba(200,230,220,0.35)';
     var c3=S.freeHours===3?'#64FFDA':'rgba(200,230,220,0.35)';
+    var c4=S.freeHours===4?'#FF4081':'rgba(200,230,220,0.35)';
     var b1=S.freeHours===1?'rgba(100,255,218,0.12)':'rgba(100,255,218,0.03)';
     var b2=S.freeHours===2?'rgba(255,140,0,0.12)':'rgba(255,140,0,0.03)';
     var b3=S.freeHours===3?'rgba(100,255,218,0.12)':'rgba(100,255,218,0.03)';
+    var b4=S.freeHours===4?'rgba(255,64,129,0.12)':'rgba(255,64,129,0.03)';
     var d1=S.freeHours===1?'#64FFDA':'rgba(100,255,218,0.2)';
     var d2=S.freeHours===2?'#FF8C00':'rgba(255,140,0,0.2)';
     var d3=S.freeHours===3?'#64FFDA':'rgba(100,255,218,0.2)';
+    var d4=S.freeHours===4?'#FF4081':'rgba(255,64,129,0.2)';
     var durBtns='<div style="display:flex;gap:6px;margin-bottom:8px">'
       +'<button onclick="startAdminTimer(1)" style="flex:1;padding:10px;border-radius:9px;border:2px solid '+d1+';background:'+b1+';color:'+c1+';font-weight:900;font-size:14px;cursor:pointer">1H</button>'
       +'<button onclick="startAdminTimer(2)" style="flex:1;padding:10px;border-radius:9px;border:2px solid '+d2+';background:'+b2+';color:'+c2+';font-weight:900;font-size:14px;cursor:pointer">2H</button>'
       +'<button onclick="startAdminTimer(3)" style="flex:1;padding:10px;border-radius:9px;border:2px solid '+d3+';background:'+b3+';color:'+c3+';font-weight:900;font-size:14px;cursor:pointer">3H</button>'
+      +'<button onclick="startAdminTimer(4)" style="flex:1;padding:10px;border-radius:9px;border:2px solid '+d4+';background:'+b4+';color:'+c4+';font-weight:900;font-size:14px;cursor:pointer">4H</button>'
     +'</div>';
     var statusLine=running
       ?'<div style="background:rgba(100,255,218,0.06);border:1px solid rgba(100,255,218,0.2);border-radius:10px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
@@ -2516,9 +2557,53 @@ function renderRoom(){
     +'</div>'
   +'</div>';
 
+  // -- Bloc sessions en file d'attente --
+  var sessionsQueueHtml=(function(){
+    var html='<div style="background:rgba(255,140,0,0.04);border:1.5px solid rgba(255,140,0,0.15);border-radius:16px;padding:16px;margin-bottom:14px">'
+      +'<div style="font-size:10px;font-weight:900;letter-spacing:1px;color:#FF8C00;margin-bottom:12px">⚡ SESSIONS EN FILE (max 3)</div>';
+    for(var si=0;si<3;si++){
+      var sess=S.sessions[si]||{name:'Session '+(si+1),setlist:[]};
+      var isActive=si===S.activeSession;
+      var isEditing=si===S.editingSession;
+      var cnt=sess.setlist.length;
+      var hasSongs=cnt>0;
+      var border=isActive?'rgba(100,255,218,0.4)':(isEditing?'rgba(255,140,0,0.4)':'rgba(100,255,218,0.12)');
+      var bg=isActive?'rgba(100,255,218,0.07)':(isEditing?'rgba(255,140,0,0.07)':'rgba(100,255,218,0.02)');
+      var badge=isActive?'<span style="font-size:9px;font-weight:900;letter-spacing:1px;background:rgba(100,255,218,0.2);color:#64FFDA;padding:2px 7px;border-radius:8px">EN COURS</span>'
+        :(isEditing?'<span style="font-size:9px;font-weight:900;letter-spacing:1px;background:rgba(255,140,0,0.2);color:#FF8C00;padding:2px 7px;border-radius:8px">EN PRÉPA</span>'
+        :(hasSongs?'<span style="font-size:9px;font-weight:900;letter-spacing:1px;background:rgba(100,255,218,0.1);color:#64FFDA;padding:2px 7px;border-radius:8px">PRÊTE</span>'
+        :'<span style="font-size:9px;color:rgba(200,230,220,0.25);padding:2px 7px">vide</span>'));
+      html+='<div style="background:'+bg+';border:1.5px solid '+border+';border-radius:12px;padding:11px 13px;margin-bottom:8px;display:flex;align-items:center;gap:10px">'
+        +'<div style="flex:1;min-width:0">'
+          +'<div style="display:flex;align-items:center;gap:7px;margin-bottom:3px">'
+            +'<span style="font-size:13px;font-weight:900;color:'+(isActive?'#64FFDA':'rgba(200,230,220,0.6)')+'">Session '+(si+1)+'</span>'
+            +badge
+          +'</div>'
+          +'<div style="font-size:11px;color:rgba(200,230,220,0.35)">'+cnt+'/'+MAX_SETLIST+' chansons</div>'
+        +'</div>'
+        +'<div style="display:flex;gap:5px;flex-shrink:0">';
+      if(isActive){
+        // Session active : juste info
+        html+='<span style="font-size:11px;color:rgba(100,255,218,0.5);padding:5px 8px">🟢</span>';
+      } else {
+        // Préparer ou activer
+        html+='<button onclick="prepareSession('+si+')" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(100,255,218,0.25);background:rgba(100,255,218,0.07);color:#64FFDA;font-size:11px;font-weight:700;cursor:pointer">📝 Préparer</button>';
+        if(hasSongs){
+          html+='<button onclick="activateSession('+si+')" style="padding:6px 10px;border-radius:8px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-size:11px;font-weight:900;cursor:pointer">⚡ Activer</button>';
+          html+='<button onclick="clearPreparedSession('+si+')" style="padding:6px 8px;border-radius:8px;border:1px solid rgba(255,100,100,0.25);background:rgba(255,100,100,0.07);color:#FF6B6B;font-size:11px;cursor:pointer">🗑</button>';
+        }
+      }
+      html+='</div></div>';
+    }
+    html+='<div style="font-size:10px;color:rgba(200,230,220,0.25);text-align:center;margin-top:4px">Prépare les sessions 2 & 3 à l\'avance → active en 1 clic 🎸</div>';
+    html+='</div>';
+    return html;
+  })();
+
   return '<div style="font-size:20px;font-weight:900;color:#64FFDA;margin-bottom:6px">🏝 Session & Set List</div>'
     +'<div style="font-size:12px;color:rgba(200,230,220,0.4);margin-bottom:16px;line-height:1.6">Set List max '+MAX_SETLIST+' chansons · Karaoké plein écran en performance.</div>'
     +infoBlock
+    +sessionsQueueHtml
     +'<div style="background:rgba(100,255,218,0.04);border:1px solid rgba(100,255,218,0.12);border-radius:16px;padding:16px;margin-bottom:14px">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
         +'<div><div class="input-label">🎵 MON SET LIST</div><div style="font-size:11px;color:rgba(200,230,220,0.35);margin-top:2px">'+ssl.length+'/'+MAX_SETLIST+' chansons</div></div>'
@@ -2673,14 +2758,84 @@ function backLib(){
 }
 function deleteSong(id){S.songs=S.songs.filter(function(sg){return sg.id!==id;});S.setlist=S.setlist.filter(function(i){return i!==id;});save();saveSL();showToast('🗑 Supprimé');render();}
 function toggleSL(id){
-  var idx=S.setlist.indexOf(id);
-  if(idx>-1){S.setlist.splice(idx,1);showToast('Retiré de la setlist');}
-  else{if(S.setlist.length>=MAX_SETLIST)return showToast('Max '+MAX_SETLIST+' chansons');S.setlist.push(id);showToast('🎵 Ajouté ('+S.setlist.length+'/'+MAX_SETLIST+')');}
-  saveSL();render();
+  // Si on prépare une session en attente, opérer sur cette session
+  var target=(S.editingSession!==null&&S.editingSession!==S.activeSession)
+    ?S.sessions[S.editingSession].setlist
+    :S.setlist;
+  var max=MAX_SETLIST;
+  var idx=target.indexOf(id);
+  if(idx>-1){
+    target.splice(idx,1);
+    if(S.editingSession!==null&&S.editingSession!==S.activeSession){
+      try{localStorage.setItem(SESK,JSON.stringify(S.sessions));}catch(e){}
+      showToast('Retiré de la Session '+(S.editingSession+1));
+    } else {
+      saveSL();showToast('Retiré de la setlist');
+    }
+  } else {
+    if(target.length>=max)return showToast('Max '+max+' chansons par session');
+    target.push(id);
+    if(S.editingSession!==null&&S.editingSession!==S.activeSession){
+      try{localStorage.setItem(SESK,JSON.stringify(S.sessions));}catch(e){}
+      showToast('🎵 Ajouté Session '+(S.editingSession+1)+' ('+target.length+'/'+max+')');
+    } else {
+      saveSL();showToast('🎵 Ajouté ('+target.length+'/'+max+')');
+    }
+  }
+  render();
 }
 function moveUp(i){if(i===0)return;var t=S.setlist[i-1];S.setlist[i-1]=S.setlist[i];S.setlist[i]=t;saveSL();render();}
 function moveDown(i){if(i>=S.setlist.length-1)return;var t=S.setlist[i+1];S.setlist[i+1]=S.setlist[i];S.setlist[i]=t;saveSL();render();}
 function newSession(){S.setlist=[];saveSL();S.roomCode=Math.random().toString(36).substring(2,8).toUpperCase();try{localStorage.setItem(RK,S.roomCode);}catch(e){}showToast('🔄 Nouvelle session — Room : '+S.roomCode);render();}
+
+// -- GESTION SESSIONS EN FILE --
+function prepareSession(idx){
+  if(idx===S.activeSession)return;
+  S.editingSession=idx;
+  S.view='library';
+  render();
+  showToast('📝 Prépare la Session '+(idx+1)+' — ajoute des chansons avec 🎵');
+}
+function stopPreparingSession(){
+  S.editingSession=null;
+  S.view='room';
+  render();
+}
+function clearPreparedSession(idx){
+  if(idx===S.activeSession)return;
+  S.sessions[idx].setlist=[];
+  try{localStorage.setItem(SESK,JSON.stringify(S.sessions));}catch(e){}
+  showToast('🗑 Session '+(idx+1)+' vidée');
+  render();
+}
+function activateSession(idx){
+  if(idx===S.activeSession)return;
+  var sess=S.sessions[idx];
+  if(!sess||sess.setlist.length===0)return showToast('⚠️ Session '+(idx+1)+' est vide — prépare-la d\'abord');
+  // Sauvegarder la session active courante
+  S.sessions[S.activeSession].setlist=S.setlist.slice();
+  // Basculer vers la nouvelle session
+  S.activeSession=idx;
+  S.setlist=sess.setlist.slice();
+  S.editingSession=null;
+  S.sessionStartTime=Date.now();
+  try{
+    localStorage.setItem('rth-active-session',String(idx));
+    localStorage.setItem('rth-session-start-admin',String(S.sessionStartTime));
+    localStorage.setItem(SESK,JSON.stringify(S.sessions));
+  }catch(e){}
+  saveSL();
+  // Sync Firestore timer aussi
+  if(_fbAuth.currentUser){
+    _fbDoc.set({
+      songs:S.songs,setlist:S.setlist,sessions:S.sessions,activeSession:S.activeSession,
+      sessionStartTime:S.sessionStartTime,freeHours:S.freeHours,
+      updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(function(){});
+  }
+  render();
+  showToast('⚡ Session '+(idx+1)+' activée ! Timer relancé 🔥');
+}
 function startAdminTimer(hours){
   S.freeHours=hours||S.freeHours||2;
   S.sessionStartTime=Date.now();
