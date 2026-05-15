@@ -10,6 +10,8 @@
   <meta name="apple-mobile-web-app-title" content="R.T.H"/>
   <title>R.T.H — Road To Hangover</title>
   
+  <!-- QR Code generator (local, pas d'API externe) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <!-- Firebase SDK (compat) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -515,6 +517,7 @@ startFirestoreSync();
 // -- CHECK URL PARAMS (session invitée) --
 (function(){
   var params=new URLSearchParams(window.location.search);
+  var rm=params.get('room'); // Format code court Firebase
   var bb=params.get('bb'); // Format cloud bytebin (court)
   var zd=params.get('z');  // Format compressé
   var sd=params.get('s');  // Format btoa classique
@@ -529,7 +532,12 @@ startFirestoreSync();
     render();
   }
 
-  if(bb){
+  if(rm){
+    _fbDB.collection('rooms').doc(rm.toUpperCase()).get().then(function(doc){
+      if(!doc.exists)return showToast('⚠️ Code session introuvable');
+      applySession(doc.data());
+    }).catch(function(){showToast('⚠️ Erreur réseau');});
+  } else if(bb){
     fetch('https://bytebin.lucko.me/'+bb)
       .then(function(r){if(!r.ok)throw new Error();return r.json();})
       .then(applySession)
@@ -1142,20 +1150,31 @@ function getSessionURLLight(){
 }
 function showQRModal(code){
   if(!code)return showToast('Crée une session d\'abord !');
+  var roomUrl=window.location.origin+window.location.pathname+'?room='+code;
   document.getElementById('qr-code-label').textContent=code;
   var wrap=document.getElementById('qr-canvas');
-  wrap.innerHTML='<div style="width:200px;height:200px;display:flex;align-items:center;justify-content:center;color:#64FFDA;font-size:12px">⏳ Génération...</div>';
+  wrap.innerHTML='';
   document.getElementById('qr-modal').classList.add('show');
-  // Utilise l'URL cloud (courte) → QR toujours lisible même avec 10+ chansons
-  getSessionURL().then(function(qrText){
-    var size=Math.min(220,Math.floor(window.innerWidth*0.55));
-    var img=document.createElement('img');
-    img.style.cssText='border-radius:8px;width:'+size+'px;height:'+size+'px';
-    img.alt='QR Code';
-    img.onload=function(){wrap.innerHTML='';wrap.appendChild(img);};
-    img.onerror=function(){wrap.innerHTML='<div style="font-size:9px;color:#FF8C00;word-break:break-all;max-width:200px;text-align:center;line-height:1.6">'+qrText+'</div>';};
-    img.src='https://api.qrserver.com/v1/create-qr-code/?size='+size+'x'+size+'&ecc=M&data='+encodeURIComponent(qrText);
-  }).catch(function(){wrap.innerHTML='<div style="color:#FF6B6B;font-size:12px">Erreur réseau</div>';});
+  // Sauvegarder le room dans Firestore avant d'afficher le QR
+  saveRoomToFirestore(code).then(function(){
+    try{
+      wrap.innerHTML='';
+      var size=Math.min(200,Math.floor(window.innerWidth*0.5));
+      new QRCode(wrap,{
+        text:roomUrl,
+        width:size,height:size,
+        colorDark:'#0a1628',colorLight:'#ffffff',
+        correctLevel:QRCode.CorrectLevel.M
+      });
+    }catch(e){
+      // Fallback si qrcodejs échoue : api externe
+      var img=document.createElement('img');
+      var s=200;
+      img.style.cssText='border-radius:8px;width:'+s+'px;height:'+s+'px';
+      img.src='https://api.qrserver.com/v1/create-qr-code/?size='+s+'x'+s+'&ecc=M&data='+encodeURIComponent(roomUrl);
+      wrap.appendChild(img);
+    }
+  });
 }
 function closeQRModal(){
   document.getElementById('qr-modal').classList.remove('show');
@@ -1191,11 +1210,33 @@ async function getSessionURL(){
   var fb=btoa(unescape(encodeURIComponent(JSON.stringify(data))));
   return window.location.origin+'?s='+fb;
 }
+// -- SAUVEGARDE SESSION DANS FIRESTORE (room court) --
+function saveRoomToFirestore(roomCode){
+  if(!roomCode)return Promise.resolve();
+  var data=buildSessionData(true);
+  if(!data)return Promise.resolve();
+  data.code=roomCode;
+  return _fbDB.collection('rooms').doc(roomCode).set(
+    Object.assign({},data,{savedAt:firebase.firestore.FieldValue.serverTimestamp()})
+  ).catch(function(e){console.warn('Room save err:',e);});
+}
+// -- URL courte ?room= --
+function getRoomURL(){
+  if(!S.roomCode)return null;
+  return window.location.origin+window.location.pathname+'?room='+S.roomCode;
+}
 function copySessionLink(){
-  getSessionURL().then(function(url){
-    if(!url)return;
-    navigator.clipboard.writeText(url).then(function(){showToast('Lien copie !');}).catch(function(){showToast('Lien : '+url);});
-  });
+  if(S.roomCode){
+    saveRoomToFirestore(S.roomCode).then(function(){
+      var url=getRoomURL();
+      navigator.clipboard.writeText(url).then(function(){showToast('🔗 Lien copié ! '+url);}).catch(function(){showToast('Lien : '+url);});
+    });
+  } else {
+    getSessionURL().then(function(url){
+      if(!url)return;
+      navigator.clipboard.writeText(url).then(function(){showToast('Lien copie !');}).catch(function(){showToast('Lien : '+url);});
+    });
+  }
 }
 
 // -- CODE DÉVERROUILLAGE — unique par visiteur + chanson + session --
@@ -1799,19 +1840,19 @@ function renderVisitorHome(){
   +'</div>'
   +'<div style="background:rgba(100,255,218,0.06);border:2px solid rgba(100,255,218,0.25);border-radius:18px;padding:18px 16px;margin-bottom:14px">'
     +'<div style="font-size:12px;font-weight:900;letter-spacing:1px;color:#64FFDA;margin-bottom:12px">&#127928; REJOINDRE UNE SESSION</div>'
-    +'<div style="font-size:11px;color:rgba(200,230,220,0.5);margin-bottom:10px">Tape le code donne par l\'admin :</div>'
-    +'<input id="visitor-join-input" type="text" maxlength="2000" placeholder="Colle le lien envoye par WhatsApp..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" '
-      +'style="width:100%;padding:14px;background:rgba(0,0,0,0.4);border:2px solid rgba(100,255,218,0.25);border-radius:12px;color:#FF8C00;font-size:13px;font-weight:700;font-family:monospace;outline:none;word-break:break-all" '
+    +'<div style="font-size:11px;color:rgba(200,230,220,0.5);margin-bottom:10px">Code donné par l\'admin (ex: AB3XY2) ou lien WhatsApp :</div>'
+    +'<input id="visitor-join-input" type="text" maxlength="2000" placeholder="AB3XY2  ou  colle le lien..." autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" '
+      +'style="width:100%;padding:14px;background:rgba(0,0,0,0.4);border:2px solid rgba(100,255,218,0.25);border-radius:12px;color:#FF8C00;font-size:18px;font-weight:900;font-family:monospace;letter-spacing:3px;text-align:center;outline:none" '
       +'oninput="checkVisitorJoin()"/>'
     +'<button id="visitor-join-btn" onclick="doVisitorJoin()" disabled '
       +'style="width:100%;margin-top:10px;padding:14px;border-radius:13px;border:none;background:linear-gradient(135deg,#64FFDA,#00B894);color:#0a1628;font-weight:900;font-size:15px;cursor:not-allowed;opacity:0.35;transition:all 0.2s">'
-      +'Rejoindre la session'
+      +'🎸 Rejoindre la session'
     +'</button>'
-    +'<div style="font-size:10px;color:rgba(200,230,220,0.25);text-align:center;margin-top:8px">Tu peux aussi coller un lien complet</div>'
+    +'<div style="font-size:10px;color:rgba(200,230,220,0.25);text-align:center;margin-top:8px">Scanne aussi le QR code affiché par l\'admin</div>'
   +'</div>'
   +'<div style="background:rgba(255,255,255,0.02);border:1px dashed rgba(100,255,218,0.1);border-radius:14px;padding:14px;text-align:center">'
     +'<div style="font-size:24px;margin-bottom:4px">&#128247;</div>'
-    +'<div style="font-size:11px;color:rgba(200,230,220,0.3)">Ou scanne le QR code affiche par l\'admin</div>'
+    +'<div style="font-size:11px;color:rgba(200,230,220,0.3)">Ou scanne le QR code affiché par l\'admin</div>'
   +'</div>'
   +(S.guestSession
     ?'<button onclick="S.view=\'guest\';render()" style="width:100%;margin-top:12px;padding:14px;border-radius:13px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-weight:900;font-size:14px;cursor:pointer">&#127925; Voir ma session en cours</button>'
@@ -2045,8 +2086,26 @@ function doVisitorJoin(){
     decoded._sessionStart=Date.now();
     S.guestSession=decoded;S.view='guest';render();
     try{localStorage.setItem('rth-session-start',String(decoded._sessionStart));}catch(e){}
-    showToast('Session '+decoded.code+' — bienvenue !');
+    showToast('🎸 Session '+decoded.code+' — bienvenue !');
   }
+  // Extraire le code depuis l'URL si c'est un lien complet
+  var roomCode=null;
+  if(val.includes('?room=')){
+    roomCode=val.split('?room=')[1].split('&')[0].toUpperCase();
+  } else if(/^[A-Z0-9]{4,8}$/i.test(val)&&!val.startsWith('http')){
+    // Code court seul (ex: AB3XY2)
+    roomCode=val.toUpperCase();
+  }
+  if(roomCode){
+    showLoading('🔑 Recherche session...','Code : '+roomCode);
+    _fbDB.collection('rooms').doc(roomCode).get().then(function(doc){
+      hideLoading();
+      if(!doc.exists)return showToast('⚠️ Code introuvable — vérifie le code ou demande un nouveau lien');
+      applyDecoded(doc.data());
+    }).catch(function(){hideLoading();showToast('⚠️ Erreur réseau — vérifie ta connexion');});
+    return;
+  }
+  // Liens longs (ancien format)
   if(val.includes('?bb=')){
     var bbk=val.split('?bb=')[1].split('&')[0];
     showLoading('Chargement...','Récupération session cloud');
@@ -2065,15 +2124,10 @@ function doVisitorJoin(){
     try{
       var sp=val.split('?s=')[1].split('&')[0];
       applyDecoded(JSON.parse(decodeURIComponent(escape(atob(sp)))));
-    }catch(e){showToast('Lien invalide ou tronque — utilise le QR code');}
+    }catch(e){showToast('Lien invalide ou tronqué');}
     return;
   }
-  if(val.startsWith('http')){
-    showToast('Ouverture...');
-    window.location.href=val;
-    return;
-  }
-  showToast('Colle le lien complet envoye par l\'admin (ou scanne le QR code)');
+  showToast('Entre le code 6 lettres ou colle le lien complet');
 }
 // -- NOTIF WHATSAPP ADMIN sur achat --
 function openGuestSong(sg){
@@ -2512,7 +2566,7 @@ function renderRoom(){
       +'<div style="font-size:26px;font-weight:900;letter-spacing:6px;color:rgba(255,140,0,0.4);text-align:center;padding:6px 0;margin-bottom:6px">'+S.roomCode+'</div>'
       +'<div style="font-size:11px;color:rgba(200,230,220,0.3);text-align:center;margin-bottom:10px">'+S.songs.length+' chanson(s) · Setlist : '+ssl.length+'</div>'
       +'<div style="display:flex;gap:6px;margin-bottom:8px">'
-        +'<button class="btn-secondary" style="flex:1;font-size:12px" onclick="showQRModal(S.roomCode)">📲 QR</button>'
+        +'<button class="btn-secondary" style="flex:1;font-size:12px" onclick="showQRModal(S.roomCode)">📲 QR Code</button>'
         +'<button onclick="shareWhatsApp()" style="flex:1;padding:11px;border-radius:10px;border:none;background:#25D366;color:#fff;font-weight:900;font-size:12px;cursor:pointer">💬 WhatsApp</button>'
         +'<button onclick="shareSession()" style="flex:1.2;padding:11px;border-radius:10px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-weight:900;font-size:12px;cursor:pointer">📤 Partager</button>'
       +'</div>'
