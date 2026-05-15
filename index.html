@@ -553,7 +553,6 @@ function saveSL(){
     }).catch(function(e){console.warn('Firestore saveSL err:',e);});
   }
 }
-function cc(chord){
 function cc(chord){return CC[chord.replace(/[^A-G]/g,'').charAt(0)]||'#64FFDA';}
 function fmt(s){if(!s||isNaN(s))return'0:00';return Math.floor(s/60)+':'+(String(Math.floor(s%60)).padStart(2,'0'));}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
