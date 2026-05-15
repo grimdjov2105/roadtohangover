@@ -529,6 +529,20 @@ function startFirestoreSync(){
     }
     if(typeof data.sessionStartTime==='number')S.sessionStartTime=data.sessionStartTime;
     if(typeof data.freeHours==='number')S.freeHours=data.freeHours;
+    // -- Sync performance admin → visiteurs --
+    if(S.mode!=='admin'&&S.guestSession){
+      if(data.perfActive===true&&typeof data.perfIndex==='number'){
+        // Charger les songs guests depuis le guestSession
+        if(S.guestSession.songs)S.guestPerfSongs=S.guestSession.songs;
+        handleGuestPerfSync(data.perfIndex);
+      } else if(data.perfActive===false){
+        // Admin a stoppé la perf
+        if(document.getElementById('perf-mode').classList.contains('show')){
+          exitPerf();
+          showToast('🎤 Performance terminée');
+        }
+      }
+    }
     // Re-render seulement si contenu vraiment changé
     if(changed){
       render();
@@ -1058,6 +1072,8 @@ function startPerf(){
   if(ov)ov.classList.remove('show');
   document.getElementById('perf-mode').classList.add('show');
   loadPerfSong(false);
+  // Sync Firestore → les visiteurs suivent automatiquement
+  syncPerfState(true);
 }
 function perfNext(){
   if(S.inGuestPerf){
@@ -1077,6 +1093,7 @@ function perfNext(){
   stopPerfTimer();
   S.perfIndex++;
   loadPerfSong(false);
+  syncPerfState(true);
 }
 function perfPrev(){
   if(S.inGuestPerf){
@@ -1096,6 +1113,8 @@ function perfPrev(){
   stopPerfTimer();
   S.perfIndex--;
   loadPerfSong(false);
+  syncPerfState(true);
+}
 }
 function togglePerfChords(){
   var panel=document.getElementById('perf-chord-panel');
@@ -1121,13 +1140,68 @@ function exitPerf(){
   var cp=document.getElementById('perf-chord-panel');
   if(cp)cp.style.display='none';
   document.getElementById('perf-mode').classList.remove('show');
-  // Restore boutons admin si besoin
   var autoBtn=document.getElementById('perf-auto-btn');
   if(autoBtn)autoBtn.style.display='';
   var buyBtn=document.getElementById('perf-buy-btn');
   if(buyBtn)buyBtn.style.display='none';
-  // Reset guest perf
   S.inGuestPerf=false; S.guestPerfSongs=[]; S.guestPerfIndex=0;
+  // Si admin → signale fin de perf aux visiteurs
+  if(S.mode==='admin')syncPerfState(false);
+}
+
+// -- SYNC ÉTAT PERFORMANCE VERS VISITEURS --
+function syncPerfState(active){
+  if(!_fbAuth.currentUser)return;
+  var perfData={
+    perfActive:active,
+    perfIndex:active?S.perfIndex:0,
+    perfChangedAt:Date.now()
+  };
+  _fbDoc.update(perfData).catch(function(){
+    // Si doc n'existe pas encore, on set
+    _fbDoc.set(Object.assign({
+      songs:S.songs,setlist:S.setlist,
+      sessions:S.sessions,activeSession:S.activeSession,
+      sessionStartTime:S.sessionStartTime||0,freeHours:S.freeHours||2
+    },perfData)).catch(function(){});
+  });
+}
+
+// -- VISITEUR : RÉCEPTION CHANGEMENT CHANSON ADMIN --
+function handleGuestPerfSync(perfIndex){
+  // Ouvrir la performance si pas encore ouverte
+  if(!document.getElementById('perf-mode').classList.contains('show')){
+    var gs=S.guestSession;
+    if(!gs||!gs.songs||gs.songs.length===0)return;
+    S.inGuestPerf=true;
+    S.guestPerfSongs=gs.songs;
+    S.guestPerfIndex=perfIndex||0;
+    PF.elapsed=0;PF.idx=-1;PF.words=[];
+    if(PF.countTimer){clearTimeout(PF.countTimer);PF.countTimer=null;}
+    var ov=document.getElementById('perf-overlay');
+    if(ov)ov.classList.remove('show');
+    document.getElementById('perf-mode').classList.add('show');
+    // Cacher boutons navigation visiteur
+    var prevBtn=document.getElementById('perf-prev-btn');
+    var nextBtn=document.getElementById('perf-next-btn');
+    if(prevBtn)prevBtn.style.display='none';
+    if(nextBtn)nextBtn.style.display='none';
+    var autoBtn=document.getElementById('perf-auto-btn');
+    if(autoBtn)autoBtn.style.display='none';
+    loadPerfSong(true);
+    showToast('🎸 Performance lancée par l\'admin !');
+  } else {
+    // Changer de chanson si l'index a changé
+    if(S.guestPerfIndex!==perfIndex){
+      if(PF.countTimer){clearTimeout(PF.countTimer);PF.countTimer=null;}
+      var ov2=document.getElementById('perf-overlay');
+      if(ov2)ov2.classList.remove('show');
+      stopPerfTimer();
+      S.guestPerfIndex=perfIndex;
+      loadPerfSong(true);
+      showToast('🎵 Chanson '+(perfIndex+1));
+    }
+  }
 }
 
 // -- QR CODE --
