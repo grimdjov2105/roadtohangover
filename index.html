@@ -138,6 +138,33 @@
     .kara-line{display:block;margin-bottom:4px;min-height:28px}
     .deco-bottom{position:fixed;bottom:0;left:0;right:0;height:180px;background:linear-gradient(180deg,transparent,rgba(0,150,120,0.07));pointer-events:none;z-index:0}
     .deco-top{position:fixed;top:0;right:0;width:350px;height:350px;background:radial-gradient(circle,rgba(255,140,0,0.05) 0%,transparent 70%);pointer-events:none;z-index:0}
+
+    /* === MOBILE 6 POUCES (≤390px) === */
+    @media(max-width:390px){
+      header{padding:10px 12px}
+      .logo-text{font-size:11px}
+      .logo-sub{font-size:8px}
+      .nav-btn{padding:8px 10px;font-size:16px;border-radius:14px}
+      main{padding:14px 12px;padding-bottom:32px}
+      .song-card{padding:9px 11px;margin-bottom:7px}
+      .song-thumb{width:36px;height:36px;font-size:13px}
+      .btn-primary{padding:13px;font-size:13px}
+      .btn-secondary{padding:10px;font-size:12px}
+      .input-field{padding:10px 12px;font-size:13px}
+      .setlist-item{padding:10px 12px;margin-bottom:6px}
+      .setlist-num{width:26px;height:26px;font-size:11px}
+      #perf-title{font-size:13px}
+      .pkw{font-size:19px}
+      .pkw.active{font-size:22px}
+      #karaoke-view{font-size:18px;padding:14px 12px}
+      #toast{font-size:12px;padding:7px 16px;top:58px}
+    }
+
+    /* === MOBILE STANDARD (≤430px) === */
+    @media(max-width:430px){
+      main{max-width:100%}
+      .magic-btn{padding:12px 14px}
+    }
   </style>
 </head>
 <body>
@@ -480,24 +507,33 @@ function startFirestoreSync(){
   _fbUnsubscribe=_fbDoc.onSnapshot(function(doc){
     if(!doc.exists)return;
     var data=doc.data();
-    // Mettre à jour songs depuis Firestore (sauf si admin en train d'éditer)
+    var prevSetlist=JSON.stringify(S.setlist);
+    var prevSongs=JSON.stringify(S.songs.map(function(s){return s.id;}));
+    var changed=false;
     if(data.songs&&Array.isArray(data.songs)){
       S.songs=data.songs;
       try{localStorage.setItem(SK,JSON.stringify(S.songs));}catch(e){}
+      if(JSON.stringify(S.songs.map(function(s){return s.id;}))!==prevSongs)changed=true;
     }
     if(data.setlist&&Array.isArray(data.setlist)){
       S.setlist=data.setlist;
       try{localStorage.setItem(SLK,JSON.stringify(S.setlist));}catch(e){}
+      if(JSON.stringify(S.setlist)!==prevSetlist)changed=true;
     }
     if(data.sessions&&Array.isArray(data.sessions)){
       S.sessions=data.sessions;
       try{localStorage.setItem(SESK,JSON.stringify(S.sessions));}catch(e){}
     }
-    if(typeof data.activeSession==='number')S.activeSession=data.activeSession;
+    if(typeof data.activeSession==='number'&&data.activeSession!==S.activeSession){
+      S.activeSession=data.activeSession;changed=true;
+    }
     if(typeof data.sessionStartTime==='number')S.sessionStartTime=data.sessionStartTime;
     if(typeof data.freeHours==='number')S.freeHours=data.freeHours;
-    render();
-    if(S.mode!=='admin')showToast('🎵 Setlist mise à jour !');
+    // Re-render seulement si contenu vraiment changé
+    if(changed){
+      render();
+      if(S.mode!=='admin')showToast('🎵 Setlist mise à jour !');
+    }
   },function(err){console.warn('Firestore sync err:',err);});
   // Charger les settings admin depuis Firestore
   _fbSettingsDoc.get().then(function(doc){
@@ -2100,9 +2136,20 @@ function doVisitorJoin(){
     showLoading('🔑 Recherche session...','Code : '+roomCode);
     _fbDB.collection('rooms').doc(roomCode).get().then(function(doc){
       hideLoading();
-      if(!doc.exists)return showToast('⚠️ Code introuvable — vérifie le code ou demande un nouveau lien');
+      if(!doc.exists){
+        showToast('⚠️ Code "'+roomCode+'" introuvable — demande à l\'admin de regénérer le lien');
+        return;
+      }
       applyDecoded(doc.data());
-    }).catch(function(){hideLoading();showToast('⚠️ Erreur réseau — vérifie ta connexion');});
+    }).catch(function(err){
+      hideLoading();
+      console.warn('Room fetch err:',err);
+      if(err&&err.code==='permission-denied'){
+        showToast('⚠️ Règles Firestore à mettre à jour — contacte l\'admin');
+      } else {
+        showToast('⚠️ Erreur réseau — vérifie ta connexion et réessaie');
+      }
+    });
     return;
   }
   // Liens longs (ancien format)
