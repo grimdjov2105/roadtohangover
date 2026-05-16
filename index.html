@@ -271,6 +271,19 @@
   </div>
 </div>
 
+<!-- =========================== GUEST SONG READER =========================== -->
+<div id="guest-song-modal" onclick="if(event.target===this)closeGuestSong()" style="display:none;position:fixed;inset:0;background:rgba(5,16,31,0.97);z-index:800;flex-direction:column">
+  <div style="padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(100,255,218,0.08);background:rgba(0,0,0,0.5);flex-shrink:0">
+    <button onclick="closeGuestSong()" style="background:rgba(255,100,100,0.15);border:none;border-radius:20px;padding:5px 12px;color:#FF6B6B;font-weight:700;font-size:13px;cursor:pointer">← Retour</button>
+    <div style="flex:1;min-width:0">
+      <div id="gsm-title" style="font-size:15px;font-weight:900;color:#64FFDA;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+      <div id="gsm-artist" style="font-size:10px;color:rgba(200,230,220,0.35)"></div>
+    </div>
+    <div id="gsm-timer" style="font-size:12px;font-weight:900;color:#64FFDA;font-family:monospace;flex-shrink:0"></div>
+  </div>
+  <div id="gsm-content" style="flex:1;overflow-y:auto;padding:16px;max-width:600px;margin:0 auto;width:100%"></div>
+</div>
+
 <!-- =========================== SESSION PREVIEW MODAL =========================== -->
 <div id="sess-preview-modal" onclick="if(event.target===this)closeSessPreview()" style="display:none;position:fixed;inset:0;background:rgba(5,16,31,0.95);z-index:750;flex-direction:column;align-items:center;justify-content:center;backdrop-filter:blur(14px)">
   <div style="background:rgba(10,22,40,0.99);border:1px solid rgba(100,255,218,0.2);border-radius:24px;padding:24px 20px 20px;max-width:340px;width:92%;max-height:80vh;display:flex;flex-direction:column;animation:fadeUp 0.3s ease">
@@ -1509,7 +1522,7 @@ function renderGuest(){
 
   var cards=songs.map(function(sg,i){
     var locked=freeExpired;
-    return '<div class="guest-song-card" style="animation-delay:'+(i*0.05)+'s;opacity:'+(locked?'0.5':'1')+';cursor:default">'
+    return '<div class="guest-song-card" '+(locked?'':' onclick="viewGuestSong(\''+sg.id+'\')" ')+' style="animation-delay:'+(i*0.05)+'s;opacity:'+(locked?'0.5':'1')+';cursor:'+(locked?'default':'pointer')+'">'
       +'<div style="display:flex;align-items:center;gap:10px">'
         +'<div style="width:28px;height:28px;border-radius:50%;background:'+(locked?'rgba(255,100,100,0.15)':'rgba(100,255,218,0.15)')+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:'+(locked?'#FF6B6B':'#64FFDA')+';flex-shrink:0">'+(locked?'🔒':i+1)+'</div>'
         +'<div class="song-thumb" style="background:linear-gradient(135deg,'+cc(sg.key||'G')+',rgba(0,0,0,0.4));width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;color:#fff;flex-shrink:0">'+esc(sg.key||'?')+'</div>'
@@ -1517,7 +1530,7 @@ function renderGuest(){
           +'<div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(sg.title)+'</div>'
           +'<div style="font-size:11px;color:rgba(200,230,220,0.4)">'+esc(sg.artist)+'</div>'
         +'</div>'
-        +'<span style="padding:5px 10px;border-radius:20px;background:rgba(100,255,218,0.05);border:1px solid rgba(100,255,218,0.15);color:rgba(100,255,218,0.3);font-size:11px;font-weight:700">'+(locked?'🔒':'🎵')+'</span>'
+        +'<span style="padding:5px 10px;border-radius:20px;background:rgba(100,255,218,0.05);border:1px solid rgba(100,255,218,0.15);color:rgba(100,255,218,0.3);font-size:11px;font-weight:700">'+(locked?'🔒':'▶')+'</span>'
       +'</div>'
     +'</div>';
   }).join('');
@@ -1532,10 +1545,10 @@ function renderGuest(){
     +'</div>'
     :'<div style="background:rgba(100,255,218,0.06);border:1px solid rgba(100,255,218,0.25);border-radius:14px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">'
       +'<div>'
-        +'<div style="font-size:10px;font-weight:900;letter-spacing:1px;color:#64FFDA;margin-bottom:2px">🎵 SESSION EN COURS</div>'
-        +'<div style="font-size:11px;color:rgba(200,230,220,0.4)">En attente de l\'admin pour lancer la musique...</div>'
+        +'<div style="font-size:10px;font-weight:900;letter-spacing:1px;color:#64FFDA;margin-bottom:2px">🟢 SESSION EN COURS</div>'
+        +'<div style="font-size:11px;color:rgba(200,230,220,0.4)">Appuie sur une chanson pour lire</div>'
       +'</div>'
-      +'<div style="font-size:22px">🎸</div>'
+      +'<div id="guest-timer-display" style="font-size:18px;font-weight:900;color:#64FFDA;font-family:monospace">'+timerStr+'</div>'
     +'</div>';
 
   return '<div style="background:linear-gradient(135deg,rgba(255,140,0,0.1),rgba(100,255,218,0.05));border:1px solid rgba(255,140,0,0.2);border-radius:18px;padding:16px;margin-bottom:14px">'
@@ -2755,23 +2768,23 @@ function renderRoom(){
     :'<button class="btn-primary btn-teal" onclick="createRoom()">🌊 Créer une Session</button>';
   var perfBtn=ssl.length>0
     ?'<div style="background:linear-gradient(135deg,rgba(255,140,0,0.07),rgba(255,69,0,0.04));border:1px solid rgba(255,140,0,0.2);border-radius:18px;padding:18px;margin-bottom:14px">'
-      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
         +'<div>'
-          +'<div style="font-size:13px;font-weight:900;color:#FF8C00;letter-spacing:0.5px">🎤 Performance</div>'
-          +'<div style="font-size:10px;color:rgba(200,230,220,0.35);margin-top:2px">'+ssl.length+' chanson'+(ssl.length>1?'s':'')+' · durée libre</div>'
-        +'</div>'
-        +'<div style="display:flex;gap:5px">'
-          +[1,2,3,4].map(function(h){
-            var active=S.freeHours===h;
-            var col=h===4?'#FF4081':h===2?'#FF8C00':'#64FFDA';
-            return '<button onclick="S.freeHours='+h+';render()" style="width:36px;height:36px;border-radius:10px;border:1.5px solid '+(active?col:'rgba(255,255,255,0.08)')+';background:'+(active?'rgba(255,255,255,0.08)':'transparent')+';color:'+(active?col:'rgba(200,230,220,0.3)')+';font-weight:900;font-size:12px;cursor:pointer">'+h+'H</button>';
-          }).join('')
+          +'<div style="font-size:13px;font-weight:900;color:#FF8C00;letter-spacing:0.5px">🌺 Lancer la performance</div>'
+          +'<div style="font-size:10px;color:rgba(200,230,220,0.35);margin-top:2px">'+ssl.length+' chanson'+(ssl.length>1?'s':'')+' · choisis la durée pour démarrer</div>'
         +'</div>'
       +'</div>'
-      +'<button onclick="startPerf()" style="width:100%;padding:16px;border-radius:14px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-weight:900;font-size:15px;cursor:pointer;letter-spacing:1.5px;box-shadow:0 6px 24px rgba(255,140,0,0.25);display:flex;align-items:center;justify-content:center;gap:10px">'
-        +'<span style="font-size:20px">🌺</span>'
-        +'<span>LANCER LA PERFORMANCE</span>'
-      +'</button>'
+      +'<div style="display:flex;gap:8px">'
+        +[1,2,3,4].map(function(h){
+          var cols=['#64FFDA','#FF8C00','#64FFDA','#FF4081'];
+          var col=cols[h-1];
+          return '<button onclick="S.freeHours='+h+';startPerf()" '
+            +'style="flex:1;padding:14px 4px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.05);color:rgba(200,230,220,0.7);font-weight:900;font-size:16px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;transition:all 0.15s">'
+            +'<span>'+h+'H</span>'
+            +'<span style="font-size:8px;letter-spacing:1px;color:rgba(200,230,220,0.3);font-weight:700">LANCER</span>'
+            +'</button>';
+        }).join('')
+      +'</div>'
     +'</div>'
     :'';
 
@@ -3033,6 +3046,77 @@ function buildSessionBtns(sgId){
   return html+'</div>';
 }
 
+
+function viewGuestSong(id){
+  var gs=S.guestSession;
+  if(!gs)return;
+  // Vérifier timer pas expiré
+  var freeMs=(gs.freeHours||2)*3600000;
+  var sessionStart=gs.sessionStartTime||gs._sessionStart||Date.now();
+  if(Date.now()-sessionStart>freeMs)return showToast('🔒 Session expirée');
+  // Trouver la chanson dans la session
+  var sg=(gs.songs||[]).find(function(x){return x.id===id;});
+  if(!sg)return;
+  // Remplir le modal
+  document.getElementById('gsm-title').textContent=sg.title;
+  document.getElementById('gsm-artist').textContent=sg.artist;
+  // Rendu paroles + accords (réutilise renderChordLyrics si dispo, sinon raw)
+  var content='';
+  if(sg.chordLyrics){
+    // Appel du renderer existant
+    var tmpSong=sg; S._guestReadSong=tmpSong;
+    content=renderChordLyricsHTML(sg.chordLyrics,0);
+  } else {
+    content='<pre style="font-size:13px;color:rgba(200,230,220,0.7);white-space:pre-wrap;line-height:1.8">'+esc(sg.lyrics||'Pas de paroles')+'</pre>';
+  }
+  document.getElementById('gsm-content').innerHTML=content;
+  document.getElementById('guest-song-modal').style.display='flex';
+  // Timer live dans le header du modal
+  if(window._gsmTimer)clearInterval(window._gsmTimer);
+  window._gsmTimer=setInterval(function(){
+    var tl=Math.max(0,freeMs-(Date.now()-sessionStart));
+    if(tl===0){
+      clearInterval(window._gsmTimer);
+      closeGuestSong();
+      render();
+      showToast('🔒 Session expirée');
+      return;
+    }
+    var tlH=Math.floor(tl/3600000);
+    var tlM=Math.floor((tl%3600000)/60000);
+    var tlS=Math.floor((tl%60000)/1000);
+    var el=document.getElementById('gsm-timer');
+    if(el)el.textContent=(tlH>0?tlH+'h ':'')+('0'+tlM).slice(-2)+'m '+('0'+tlS).slice(-2)+'s';
+  },1000);
+}
+function closeGuestSong(){
+  if(window._gsmTimer){clearInterval(window._gsmTimer);window._gsmTimer=null;}
+  document.getElementById('guest-song-modal').style.display='none';
+}
+// Render chord lyrics HTML (version lecture seule visiteur)
+function renderChordLyricsHTML(cl,transpose){
+  if(!cl)return'';
+  var lines=cl.split('\n');
+  var html='';
+  lines.forEach(function(line){
+    var trimmed=line.trim();
+    if(!trimmed){html+='<div style="height:10px"></div>';return;}
+    var isChord=/^\[/.test(trimmed);
+    if(isChord){
+      var chords=trimmed.match(/\[([^\]]+)\]/g)||[];
+      html+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px">';
+      chords.forEach(function(c){
+        var ch=c.slice(1,-1);
+        if(transpose){ch=transposeChord(ch,transpose);}
+        html+='<span style="display:inline-block;padding:2px 8px;border-radius:5px;border:1px solid rgba(100,255,218,0.3);background:rgba(100,255,218,0.07);font-size:11px;font-weight:900;color:#64FFDA">'+esc(ch)+'</span>';
+      });
+      html+='</div>';
+    } else {
+      html+='<div style="font-size:14px;color:rgba(200,230,220,0.8);line-height:1.9;margin-bottom:2px">'+esc(line)+'</div>';
+    }
+  });
+  return html;
+}
 
 function closeDoublonModal(){
   document.getElementById('doublon-modal').style.display='none';
