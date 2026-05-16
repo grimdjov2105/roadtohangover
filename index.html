@@ -590,6 +590,25 @@ function startFirestoreSync(){
     }
     if(typeof data.sessionStartTime==='number')S.sessionStartTime=data.sessionStartTime;
     if(typeof data.freeHours==='number')S.freeHours=data.freeHours;
+    // -- Force déconnexion visiteurs --
+    if(S.mode!=='admin'&&S.guestSession&&data.forceDisconnect){
+      var lastKick=data.forceDisconnectAt||0;
+      var joinTime=S.guestSession._sessionStart||S.guestSession.sessionStartTime||0;
+      if(lastKick>joinTime){
+        // Effacer session locale
+        localStorage.removeItem('rth-guest-session');
+        localStorage.removeItem('rth-session-start');
+        S.guestSession=null;
+        S.inGuestPerf=false;
+        if(document.getElementById('perf-mode').classList.contains('show')){
+          exitPerf();
+        }
+        S.view='visitor-home';
+        render();
+        showToast('⛔ Vous avez été déconnecté par l\'admin');
+        return;
+      }
+    }
     // -- Sync performance admin → visiteurs --
     if(S.mode!=='admin'&&S.guestSession){
       if(data.perfActive===true&&typeof data.perfIndex==='number'){
@@ -2853,6 +2872,7 @@ function renderRoom(){
     +'<div style="background:rgba(255,140,0,0.05);border:1px solid rgba(255,140,0,0.12);border-radius:16px;padding:16px;margin-bottom:14px">'
       +'<div class="input-label" style="color:#FF8C00;margin-bottom:12px">🏝 CODE SESSION</div>'
       +sessionCodeHtml
+      +'<button onclick="forceDisconnectAll()" style="width:100%;margin-top:10px;padding:11px;border-radius:11px;border:1px solid rgba(255,100,100,0.3);background:rgba(255,100,100,0.07);color:#FF6B6B;font-weight:700;font-size:12px;cursor:pointer">⛔ Déconnecter tous les visiteurs</button>'
     +'</div>'
     +'<div style="background:rgba(100,255,218,0.03);border:1px solid rgba(100,255,218,0.1);border-radius:16px;padding:16px">'
       +'<div class="input-label" style="margin-bottom:10px">🔗 REJOINDRE UNE SESSION</div>'
@@ -3157,6 +3177,16 @@ function toggleSL(id, sessionIdx){
 function moveUp(i){if(i===0)return;var t=S.setlist[i-1];S.setlist[i-1]=S.setlist[i];S.setlist[i]=t;saveSL();render();}
 function moveDown(i){if(i>=S.setlist.length-1)return;var t=S.setlist[i+1];S.setlist[i+1]=S.setlist[i];S.setlist[i]=t;saveSL();render();}
 function newSession(){S.setlist=[];saveSL();S.roomCode=Math.random().toString(36).substring(2,8).toUpperCase();try{localStorage.setItem(RK,S.roomCode);}catch(e){}showToast('🔄 Nouvelle session — Room : '+S.roomCode);render();}
+
+function forceDisconnectAll(){
+  if(!_fbAuth.currentUser)return;
+  var kick={forceDisconnect:true,forceDisconnectAt:Date.now()};
+  _fbDoc.update(kick).catch(function(){});
+  if(S.roomCode){
+    _fbDB.collection('rooms').doc(S.roomCode).update(kick).catch(function(){});
+  }
+  showToast('⛔ Tous les visiteurs ont été déconnectés');
+}
 
 // -- GESTION SESSIONS EN FILE --
 function prepareSession(idx){
