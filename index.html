@@ -484,7 +484,7 @@ var S={
   visitorProfile:null, // {name, email, phone}
   adminWhatsApp:'',
   adminPwdSet:false,
-  inGuestPerf:false, guestPerfIndex:0, guestPerfSongs:[],
+  inGuestPerf:false, guestPerfIndex:0, guestPerfSongs:[], displayedSession:0,
   sessions:[
     {name:'Session 1',setlist:[]},
     {name:'Session 2',setlist:[]},
@@ -595,17 +595,23 @@ function startFirestoreSync(){
       var lastKick=data.forceDisconnectAt||0;
       var joinTime=S.guestSession._sessionStart||S.guestSession.sessionStartTime||0;
       if(lastKick>joinTime){
-        // Effacer session locale
-        localStorage.removeItem('rth-guest-session');
-        localStorage.removeItem('rth-session-start');
+        // Kick de la session en cours SANS effacer le localStorage
+        // → visiteur peut revenir via refresh (rejoindre avec son code sauvegardé)
         S.guestSession=null;
         S.inGuestPerf=false;
-        if(document.getElementById('perf-mode').classList.contains('show')){
-          exitPerf();
-        }
+        if(document.getElementById('perf-mode').classList.contains('show')){exitPerf();}
+        // Mettre à jour le _sessionStart dans localStorage pour éviter re-kick au refresh
+        try{
+          var saved=localStorage.getItem('rth-guest-session');
+          if(saved){
+            var gs2=JSON.parse(saved);
+            gs2._sessionStart=Date.now(); // reset joinTime pour éviter re-kick
+            localStorage.setItem('rth-guest-session',JSON.stringify(gs2));
+          }
+        }catch(e){}
         S.view='visitor-home';
         render();
-        showToast('⛔ Vous avez été déconnecté par l\'admin');
+        showToast('⛔ Déconnecté par l\'admin — rafraîchis pour rejoindre');
         return;
       }
     }
@@ -2823,29 +2829,33 @@ function renderRoom(){
   // -- 3 cartes sessions --
   var sessionsQueueHtml=(function(){
     var html='<div style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px">';
+    var displayed=S.displayedSession!==undefined?S.displayedSession:S.activeSession;
     for(var si=0;si<3;si++){
       var sess=S.sessions[si]||{name:'Session '+(si+1),setlist:[]};
       var isActive=si===S.activeSession;
+      var isDisplayed=si===displayed;
       var sl_i=isActive?S.setlist:sess.setlist;
       var cnt=sl_i.length;
-      var border=isActive?'rgba(100,255,218,0.3)':'rgba(100,255,218,0.08)';
-      var bg=isActive?'rgba(100,255,218,0.05)':'rgba(100,255,218,0.01)';
+      var border=isDisplayed?'rgba(255,140,0,0.5)':(isActive?'rgba(100,255,218,0.3)':'rgba(100,255,218,0.08)');
+      var bg=isDisplayed?'rgba(255,140,0,0.06)':(isActive?'rgba(100,255,218,0.05)':'rgba(100,255,218,0.01)');
       var preview=cnt===0
         ?'<span style="font-size:10px;color:rgba(200,230,220,0.2);font-style:italic">vide</span>'
         :sl_i.slice(0,3).map(function(id){
             var sg=S.songs.find(function(x){return x.id===id;});
             return sg?('<span style="background:rgba(255,255,255,0.05);border-radius:5px;padding:1px 7px;font-size:10px;color:rgba(200,230,220,0.45)">'+esc(sg.title)+'</span>'):'';
-          }).join('')+(cnt>3?'<span style="font-size:10px;color:rgba(200,230,220,0.25);margin-left:2px">+'+( cnt-3)+'</span>':'');
+          }).join('')+(cnt>3?'<span style="font-size:10px;color:rgba(200,230,220,0.25);margin-left:2px">+'+(cnt-3)+'</span>':'');
       html+='<div style="background:'+bg+';border:1.5px solid '+border+';border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:10px">'
         +'<div style="flex:1;min-width:0">'
           +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">'
             +(isActive?'<span style="width:7px;height:7px;border-radius:50%;background:#64FFDA;flex-shrink:0;box-shadow:0 0 6px #64FFDA55"></span>':'<span style="width:7px;height:7px;border-radius:50%;background:rgba(200,230,220,0.15);flex-shrink:0"></span>')
             +'<span style="font-size:13px;font-weight:900;color:'+(isActive?'#64FFDA':'rgba(200,230,220,0.5)')+'">S'+(si+1)+'</span>'
             +'<span style="font-size:10px;color:rgba(200,230,220,0.25)">'+cnt+'/'+MAX_SETLIST+'</span>'
+            +(isDisplayed?'<span style="font-size:9px;font-weight:900;background:rgba(255,140,0,0.2);color:#FF8C00;padding:2px 7px;border-radius:6px;letter-spacing:0.5px">📺 AFFICHÉ</span>':'')
           +'</div>'
           +'<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">'+preview+'</div>'
         +'</div>'
         +'<div style="display:flex;gap:6px;flex-shrink:0">'
+          +(cnt>0&&!isDisplayed?'<button onclick="displaySession('+si+')" style="padding:7px 10px;border-radius:9px;border:1px solid rgba(255,140,0,0.3);background:rgba(255,140,0,0.07);color:#FF8C00;font-size:11px;font-weight:700;cursor:pointer">📺</button>':'')
           +'<button onclick="showSessionPreview('+si+')" style="padding:7px 12px;border-radius:9px;border:1px solid rgba(100,255,218,0.18);background:transparent;color:rgba(100,255,218,0.6);font-size:12px;font-weight:700;cursor:pointer">👁 Voir</button>'
           +(cnt>0
             ?'<button onclick="launchSession('+si+')" style="padding:7px 12px;border-radius:9px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-size:12px;font-weight:900;cursor:pointer;box-shadow:0 3px 10px rgba(255,140,0,0.2)">🎤 Lancer</button>'
@@ -3211,21 +3221,17 @@ function clearPreparedSession(idx){
 function activateSession(idx){
   if(idx===S.activeSession)return;
   var sess=S.sessions[idx];
-  if(!sess||sess.setlist.length===0)return showToast('⚠️ Session '+(idx+1)+' est vide — prépare-la d\'abord');
-  // Sauvegarder la session active courante
+  if(!sess||sess.setlist.length===0)return showToast('⚠️ Session '+(idx+1)+' est vide');
   S.sessions[S.activeSession].setlist=S.setlist.slice();
-  // Basculer vers la nouvelle session
   S.activeSession=idx;
   S.setlist=sess.setlist.slice();
   S.editingSession=null;
-  S.sessionStartTime=Date.now();
+  // NE PAS démarrer le timer ici — seulement via startPerf()
   try{
     localStorage.setItem('rth-active-session',String(idx));
-    localStorage.setItem('rth-session-start-admin',String(S.sessionStartTime));
     localStorage.setItem(SESK,JSON.stringify(S.sessions));
   }catch(e){}
   saveSL();
-  // Sync Firestore timer aussi
   if(_fbAuth.currentUser){
     _fbDoc.set({
       songs:S.songs,setlist:S.setlist,sessions:S.sessions,activeSession:S.activeSession,
@@ -3233,8 +3239,29 @@ function activateSession(idx){
       updatedAt:firebase.firestore.FieldValue.serverTimestamp()
     }).catch(function(){});
   }
+  // Afficher automatiquement cette session aux visiteurs
+  displaySession(idx);
   render();
-  showToast('⚡ Session '+(idx+1)+' activée ! Timer relancé 🔥');
+  showToast('⚡ Session '+(idx+1)+' sélectionnée');
+}
+
+// -- AFFICHER UNE SESSION AUX VISITEURS (sans lancer le timer) --
+function displaySession(idx){
+  S.displayedSession=idx;
+  var sl_i=(idx===S.activeSession)?S.setlist:(S.sessions[idx]?S.sessions[idx].setlist:[]);
+  var sessionSongs=sl_i.map(function(id){
+    return S.songs.find(function(sg){return sg.id===id;});
+  }).filter(Boolean);
+  if(!S.roomCode||!_fbAuth.currentUser)return;
+  _fbDB.collection('rooms').doc(S.roomCode).update({
+    displayedSession:idx,
+    songs:sessionSongs,
+    setlist:sl_i
+  }).catch(function(){
+    _fbDB.collection('rooms').doc(S.roomCode).set({
+      displayedSession:idx,songs:sessionSongs,setlist:sl_i,code:S.roomCode
+    }).catch(function(){});
+  });
 }
 function startAdminTimer(hours){
   S.freeHours=hours||S.freeHours||2;
