@@ -500,6 +500,22 @@ try{
   S.sessionStartTime=parseInt(localStorage.getItem('rth-session-start-admin')||'0')||0;
   S.adminPwdSet=true; // Firebase gère l'auth
   try{var _pr=localStorage.getItem(PROFK);S.visitorProfile=_pr?JSON.parse(_pr):null;}catch(e){}
+  // Restaurer la session visiteur après refresh (si pas expirée)
+  try{
+    var _gs=localStorage.getItem('rth-guest-session');
+    if(_gs){
+      var _gsParsed=JSON.parse(_gs);
+      var _gsFreeMs=(_gsParsed.freeHours||2)*3600000;
+      var _gsStart=_gsParsed.sessionStartTime||_gsParsed._sessionStart||0;
+      var _gsExpired=_gsStart>0&&(Date.now()-_gsStart)>_gsFreeMs;
+      if(!_gsExpired&&_gsParsed.code){
+        S.guestSession=_gsParsed;
+        S.view='guest';
+      } else {
+        localStorage.removeItem('rth-guest-session');
+      }
+    }
+  }catch(e){}
   // Charger les sessions pré-enregistrées
   try{var _ses=localStorage.getItem(SESK);if(_ses){S.sessions=JSON.parse(_ses);}else{S.sessions[0].setlist=S.setlist.slice();}}catch(e){}
   S.activeSession=parseInt(localStorage.getItem('rth-active-session')||'0')||0;
@@ -570,6 +586,8 @@ function startFirestoreSync(){
           S.guestSession.songs=data.songs;
           S.guestSession.sessionStartTime=data.sessionStartTime||S.guestSession.sessionStartTime;
           S.guestSession.freeHours=data.freeHours||S.guestSession.freeHours;
+          // Mettre à jour localStorage pour le prochain refresh
+          try{localStorage.setItem('rth-guest-session',JSON.stringify(S.guestSession));}catch(e){}
         }
         S.guestPerfSongs=S.guestSession.songs||[];
         handleGuestPerfSync(data.perfIndex, data.sessionStartTime, data.freeHours);
@@ -615,6 +633,8 @@ startFirestoreSync();
     decoded._sessionStart=savedStart||Date.now();
     if(!savedStart)try{localStorage.setItem('rth-session-start',String(decoded._sessionStart));}catch(e){}
     S.guestSession=decoded;
+    // Sauvegarder en localStorage pour persister après refresh
+    try{localStorage.setItem('rth-guest-session',JSON.stringify(decoded));}catch(e){}
     S.view='guest';
     render();
   }
@@ -1528,7 +1548,7 @@ function renderGuest(){
   +timerBanner
   +(freeExpired?'':'<div style="font-size:11px;font-weight:900;letter-spacing:1px;color:rgba(200,230,220,0.35);margin-bottom:10px">SET LIST — APPUIE SUR UNE CHANSON POUR JOUER</div>')
   +cards
-  +'<div style="margin-top:14px;text-align:center"><button onclick="S.guestSession=null;S.view=\'visitor-home\';render()" style="background:none;border:none;color:rgba(200,230,220,0.4);font-size:12px;cursor:pointer;font-weight:700">Quitter la session</button></div>';
+  +'<div style="margin-top:14px;text-align:center"><button onclick="localStorage.removeItem(\'rth-guest-session\');localStorage.removeItem(\'rth-session-start\');S.guestSession=null;S.view=\'visitor-home\';render()" style="background:none;border:none;color:rgba(200,230,220,0.4);font-size:12px;cursor:pointer;font-weight:700">Quitter la session</button></div>';
 }
 
 // -- VIEWS --
@@ -2750,7 +2770,7 @@ function renderRoom(){
       +'</div>'
       +'<button onclick="startPerf()" style="width:100%;padding:16px;border-radius:14px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-weight:900;font-size:15px;cursor:pointer;letter-spacing:1.5px;box-shadow:0 6px 24px rgba(255,140,0,0.25);display:flex;align-items:center;justify-content:center;gap:10px">'
         +'<span style="font-size:20px">🌺</span>'
-        +'<span>LANCER · '+(S.freeHours||2)+'H</span>'
+        +'<span>LANCER LA PERFORMANCE</span>'
       +'</button>'
     +'</div>'
     :'';
@@ -2993,7 +3013,7 @@ function showSessionPreview(si){
         +'</div>';
       }).join('');
   footer.innerHTML=sl_i.length>0
-    ?'<button onclick="closeSessPreview();launchSession('+si+')" style="width:100%;padding:13px;border-radius:13px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-weight:900;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px"><span style="font-size:18px">🌺</span><span>LANCER · '+(S.freeHours||2)+'H</span></button>'
+    ?'<button onclick="closeSessPreview();launchSession('+si+')" style="width:100%;padding:13px;border-radius:13px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-weight:900;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px"><span style="font-size:18px">🌺</span><span>LANCER LA PERFORMANCE</span></button>'
     :'';
   document.getElementById('sess-preview-modal').style.display='flex';
 }
