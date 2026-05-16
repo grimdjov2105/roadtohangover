@@ -2767,24 +2767,17 @@ function renderRoom(){
       +'<button onclick="copySessionLink()" style="width:100%;padding:10px;border-radius:10px;border:1px solid rgba(100,255,218,0.2);background:rgba(100,255,218,0.06);color:#64FFDA;font-weight:700;font-size:12px;cursor:pointer;margin-bottom:4px">📋 Copier le lien</button>'
     :'<button class="btn-primary btn-teal" onclick="createRoom()">🌊 Créer une Session</button>';
   var perfBtn=ssl.length>0
-    ?'<div style="background:linear-gradient(135deg,rgba(255,140,0,0.07),rgba(255,69,0,0.04));border:1px solid rgba(255,140,0,0.2);border-radius:18px;padding:18px;margin-bottom:14px">'
-      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
-        +'<div>'
-          +'<div style="font-size:13px;font-weight:900;color:#FF8C00;letter-spacing:0.5px">🌺 Lancer la performance</div>'
-          +'<div style="font-size:10px;color:rgba(200,230,220,0.35);margin-top:2px">'+ssl.length+' chanson'+(ssl.length>1?'s':'')+' · choisis la durée pour démarrer</div>'
-        +'</div>'
-      +'</div>'
+    ?'<div style="background:rgba(100,255,218,0.03);border:1px solid rgba(100,255,218,0.1);border-radius:16px;padding:14px 16px;margin-bottom:14px">'
+      +'<div style="font-size:10px;font-weight:900;letter-spacing:1px;color:#64FFDA;margin-bottom:10px">⏱ DURÉE GRATUITE</div>'
       +'<div style="display:flex;gap:8px">'
         +[1,2,3,4].map(function(h){
-          var cols=['#64FFDA','#FF8C00','#64FFDA','#FF4081'];
-          var col=cols[h-1];
-          return '<button onclick="S.freeHours='+h+';startPerf()" '
-            +'style="flex:1;padding:14px 4px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.05);color:rgba(200,230,220,0.7);font-weight:900;font-size:16px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;transition:all 0.15s">'
-            +'<span>'+h+'H</span>'
-            +'<span style="font-size:8px;letter-spacing:1px;color:rgba(200,230,220,0.3);font-weight:700">LANCER</span>'
-            +'</button>';
+          var active=S.freeHours===h;
+          var col=h===4?'#FF4081':h===2?'#FF8C00':'#64FFDA';
+          return '<button onclick="S.freeHours='+h+';render()" '
+            +'style="flex:1;padding:12px 4px;border-radius:11px;border:1.5px solid '+(active?col:'rgba(255,255,255,0.07)')+';background:'+(active?'rgba(255,255,255,0.07)':'transparent')+';color:'+(active?col:'rgba(200,230,220,0.3)')+';font-weight:900;font-size:15px;cursor:pointer">'+h+'H</button>';
         }).join('')
       +'</div>'
+      +'<div style="font-size:10px;color:rgba(200,230,220,0.25);margin-top:8px;text-align:center">Appuie sur 🎤 Lancer d\'une session pour démarrer le compteur</div>'
     +'</div>'
     :'';
 
