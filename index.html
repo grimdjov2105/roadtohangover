@@ -518,6 +518,11 @@ _fbAuth.onAuthStateChanged(function(user){
     if(S.mode!=='admin'){
       S.mode='admin';
       startFirestoreSync();
+      // Si timer encore actif → afficher directement la vue room
+      var now=Date.now();
+      var freeMs=(S.freeHours||2)*3600000;
+      var timerActif=S.sessionStartTime>0&&(now-S.sessionStartTime)<freeMs;
+      if(timerActif) S.view='room';
       render();
       showToast('👑 Reconnecté automatiquement !');
     }
@@ -559,7 +564,14 @@ function startFirestoreSync(){
     // -- Sync performance admin → visiteurs --
     if(S.mode!=='admin'&&S.guestSession){
       if(data.perfActive===true&&typeof data.perfIndex==='number'){
-        if(S.guestSession.songs)S.guestPerfSongs=S.guestSession.songs;
+        // Utiliser les chansons fraîches de Firestore (session active de l'admin)
+        // et pas les chansons au moment du join (qui peuvent être d'une autre session)
+        if(data.songs&&Array.isArray(data.songs)&&data.songs.length>0){
+          S.guestSession.songs=data.songs;
+          S.guestSession.sessionStartTime=data.sessionStartTime||S.guestSession.sessionStartTime;
+          S.guestSession.freeHours=data.freeHours||S.guestSession.freeHours;
+        }
+        S.guestPerfSongs=S.guestSession.songs||[];
         handleGuestPerfSync(data.perfIndex, data.sessionStartTime, data.freeHours);
       } else if(data.perfActive===false){
         if(document.getElementById('perf-mode').classList.contains('show')){
@@ -1193,7 +1205,6 @@ function syncPerfState(active){
     perfActive:active,
     perfIndex:active?S.perfIndex:0,
     perfChangedAt:Date.now(),
-    // Timer session inclus → visiteurs savent que chansons sont débloquées
     sessionStartTime:S.sessionStartTime||0,
     freeHours:S.freeHours||2
   };
@@ -1203,14 +1214,23 @@ function syncPerfState(active){
       sessions:S.sessions,activeSession:S.activeSession
     },perfData)).catch(function(){});
   });
-  // Sync aussi dans rooms (pour visiteurs qui rejoignent en cours)
+  // Sync rooms → inclut songs+setlist de la session active pour les visiteurs
   if(S.roomCode){
-    _fbDB.collection('rooms').doc(S.roomCode).update({
+    // Construire la liste des chansons de la setlist active
+    var setlistSongs=S.setlist.map(function(id){
+      return S.songs.find(function(sg){return sg.id===id;});
+    }).filter(Boolean);
+    _fbDB.collection('rooms').doc(S.roomCode).update(Object.assign({
       perfActive:active,
       perfIndex:active?S.perfIndex:0,
       sessionStartTime:S.sessionStartTime||0,
-      freeHours:S.freeHours||2
-    }).catch(function(){});
+      freeHours:S.freeHours||2,
+      songs:setlistSongs,        // chansons de la session active
+      setlist:S.setlist          // ordre setlist
+    },{})).catch(function(){
+      // Si le doc n'existe pas encore, le créer
+      saveRoomToFirestore(S.roomCode).catch(function(){});
+    });
   }
 }
 
