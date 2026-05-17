@@ -1598,9 +1598,11 @@ function renderGuest(){
   if(!gs)return'<div style="text-align:center;padding:40px">Aucune session</div>';
   var songs=gs.songs||[];
   var freeMs=(gs.freeHours||2)*3600*1000;
-  var sessionStart=gs.sessionStartTime||gs._sessionStart||Date.now();
-  var elapsed=Date.now()-sessionStart;
-  var freeExpired=elapsed>freeMs;
+  var sessionStart=gs.sessionStartTime||gs._sessionStart||0;
+  // Si sessionStart=0 → session pas encore démarrée par l'admin → chansons verrouillées
+  var sessionNotStarted=(sessionStart===0);
+  var elapsed=sessionStart>0?(Date.now()-sessionStart):0;
+  var freeExpired=sessionNotStarted||(elapsed>freeMs);
   var timeLeft=Math.max(0,freeMs-elapsed);
   var tlH=Math.floor(timeLeft/3600000);
   var tlM=Math.floor((timeLeft%3600000)/60000);
@@ -1624,12 +1626,19 @@ function renderGuest(){
 
   // Bandeau session active ou expirée
   var timerBanner=freeExpired
-    ?'<div style="background:linear-gradient(135deg,rgba(100,255,218,0.06),rgba(255,215,0,0.06));border:2px solid rgba(100,255,218,0.2);border-radius:16px;padding:18px 16px;margin-bottom:14px;text-align:center">'
-      +'<div style="font-size:32px;margin-bottom:8px">🙏</div>'
-      +'<div style="font-size:15px;font-weight:900;color:#FFD700;margin-bottom:6px">Session terminée — Merci d\'avoir été là !</div>'
-      +'<div style="font-size:12px;color:rgba(200,230,220,0.5);margin-bottom:14px;line-height:1.7">Tu as aimé la musique ?<br/>Un petit don fait plaisir à l\'artiste 💙</div>'
-      +'<button onclick="showDonModal()" style="width:100%;padding:13px;border-radius:13px;border:none;background:linear-gradient(135deg,#FFD700,#FF8C00);color:#0a1628;font-weight:900;font-size:14px;cursor:pointer;letter-spacing:1px">💙 Faire un don</button>'
-    +'</div>'
+    ?(sessionNotStarted
+      ?'<div style="background:rgba(100,181,255,0.06);border:2px solid rgba(100,181,255,0.2);border-radius:16px;padding:16px;margin-bottom:14px;text-align:center">'
+        +'<div style="font-size:28px;margin-bottom:8px">⏳</div>'
+        +'<div style="font-size:14px;font-weight:900;color:#64B5FF;margin-bottom:4px">En attente du démarrage</div>'
+        +'<div style="font-size:11px;color:rgba(200,230,220,0.4);line-height:1.7">L\'admin n\'a pas encore lancé la session.<br/>Les chansons seront accessibles dès que ça commence !</div>'
+      +'</div>'
+      :'<div style="background:linear-gradient(135deg,rgba(100,255,218,0.06),rgba(255,215,0,0.06));border:2px solid rgba(100,255,218,0.2);border-radius:16px;padding:18px 16px;margin-bottom:14px;text-align:center">'
+        +'<div style="font-size:32px;margin-bottom:8px">🙏</div>'
+        +'<div style="font-size:15px;font-weight:900;color:#FFD700;margin-bottom:6px">Session terminée — Merci d\'avoir été là !</div>'
+        +'<div style="font-size:12px;color:rgba(200,230,220,0.5);margin-bottom:14px;line-height:1.7">Tu as aimé la musique ?<br/>Un petit don fait plaisir à l\'artiste 💙</div>'
+        +'<button onclick="showDonModal()" style="width:100%;padding:13px;border-radius:13px;border:none;background:linear-gradient(135deg,#FFD700,#FF8C00);color:#0a1628;font-weight:900;font-size:14px;cursor:pointer;letter-spacing:1px">💙 Faire un don</button>'
+      +'</div>'
+    )
     :'<div style="background:rgba(100,255,218,0.06);border:1px solid rgba(100,255,218,0.25);border-radius:14px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">'
       +'<div>'
         +'<div style="font-size:10px;font-weight:900;letter-spacing:1px;color:#64FFDA;margin-bottom:2px">🟢 SESSION EN COURS</div>'
@@ -1807,6 +1816,20 @@ function resetTranspose(){
   S.karaokeWords=[];S.karaokeIdx=-1;
   render();
   showToast('🔄 Transposition remise à 0');
+}
+function saveTransposedChords(){
+  if(!S.selected||S.transposeOffset===0)return;
+  var newLyrics=transposeLyrics(S.selected.chordLyrics,S.transposeOffset);
+  S.songs=S.songs.map(function(sg){
+    if(sg.id!==S.selected.id)return sg;
+    return Object.assign({},sg,{chordLyrics:newLyrics});
+  });
+  S.selected=S.songs.find(function(sg){return sg.id===S.selected.id;});
+  S.transposeOffset=0;
+  S.karaokeWords=[];S.karaokeIdx=-1;
+  save();
+  showToast('✅ Tonalité sauvegardée définitivement !');
+  render();
 }
 function getTransposedSong(song){
   if(!song||S.transposeOffset===0)return song;
@@ -2107,8 +2130,26 @@ setInterval(function(){
       adminTimer.textContent=(h2>0?h2+'h ':'')+('0'+m2).slice(-2)+'m '+('0'+s2).slice(-2)+'s';
     } else if(S.view==='room'){render();}
   }
-  // Rafraichir le timer acces gratuit session visiteur — timer masqué côté visiteur
-  // (l'expiration est gérée par Firestore sessionStartTime)
+  // Rafraichir le timer acces gratuit session visiteur
+  if(S.mode!=='admin'&&S.guestSession&&S.view==='guest-session'){
+    var gsFreeMs=(S.guestSession.freeHours||2)*3600000;
+    var gsStart=S.guestSession.sessionStartTime||S.guestSession._sessionStart||0;
+    if(gsStart>0){
+      var gsTimeLeft=Math.max(0,gsFreeMs-(now-gsStart));
+      var gsTD=document.getElementById('guest-timer-display');
+      if(gsTD){
+        if(gsTimeLeft>0){
+          var gsTH=Math.floor(gsTimeLeft/3600000);
+          var gsTM=Math.floor((gsTimeLeft%3600000)/60000);
+          var gsTS=Math.floor((gsTimeLeft%60000)/1000);
+          gsTD.textContent=(gsTH>0?gsTH+'h ':'')+('0'+gsTM).slice(-2)+'m '+('0'+gsTS).slice(-2)+'s';
+        } else {
+          // Vient d'expirer → re-render pour afficher le bandeau "terminée"
+          render();
+        }
+      }
+    }
+  }
 },1000); // toutes les secondes pour le timer
 
 // ==========================================
@@ -2670,13 +2711,6 @@ function renderPlay(){
           +'Format : <span style="color:#64FFDA;font-family:monospace">[G]mot [Am]mot</span> — colle l\'accord juste avant le mot.<br/>'
           +'Ligne vide = séparation de couplet. Paroles sans accords = pas de crochets.'
         +'</div>'
-        +'<div id="edit-transpose-bar" style="display:flex;align-items:center;gap:7px;margin-bottom:9px;padding:9px 12px;background:rgba(0,0,0,0.3);border-radius:12px;border:1px solid rgba(100,255,218,0.1)">'
-          +'<span style="font-size:9px;font-weight:900;letter-spacing:1.5px;color:rgba(200,230,220,0.35);flex-shrink:0">♩ TONALITÉ</span>'
-          +'<button onclick="editTranspose(-1)" style="width:32px;height:32px;border-radius:50%;border:1px solid rgba(100,181,255,0.4);background:rgba(100,181,255,0.1);color:#64B5FF;font-size:16px;font-weight:900;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center">▼</button>'
-          +'<div id="edit-transpose-lbl" style="flex:1;text-align:center;font-size:13px;font-weight:900;color:'+(S.editTotalTranspose===0?'rgba(200,230,220,0.45)':(S.editTotalTranspose>0?'#FF8C00':'#64B5FF'))+'">'+(S.editTotalTranspose===0?'Original':(S.editTotalTranspose>0?'↑ +'+S.editTotalTranspose:'↓ '+S.editTotalTranspose))+' demi-tons</div>'
-          +'<button onclick="editTranspose(1)" style="width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,140,0,0.4);background:rgba(255,140,0,0.1);color:#FF8C00;font-size:16px;font-weight:900;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center">▲</button>'
-          +'<button onclick="editTransposeReset()" style="padding:5px 10px;border-radius:9px;border:1px solid rgba(255,100,100,0.3);background:rgba(255,100,100,0.07);color:#FF6B6B;font-size:11px;font-weight:800;cursor:pointer;flex-shrink:0'+(S.editTotalTranspose===0?';opacity:0.4;pointer-events:none':'')+'" title="Remettre la tonalité originale">↺ Reset</button>'
-        +'</div>'
         +'<textarea class="input-field" id="edit-lyrics" rows="14" style="resize:vertical;font-family:monospace;font-size:13px;line-height:1.9" oninput="S.editText=this.value">'+esc(S.editText)+'</textarea>'
       +'</div>'
       +'<div style="display:flex;gap:8px;margin-bottom:10px">'
@@ -2758,6 +2792,7 @@ function renderPlay(){
       +'<button onclick="transpose(-1)" style="width:36px;height:36px;border-radius:50%;border:1px solid rgba(100,181,255,0.35);background:rgba(100,181,255,0.1);color:#64B5FF;font-size:18px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">▼</button>'
       +'<button onclick="resetTranspose()" style="flex:1;padding:7px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);font-size:15px;font-weight:900;cursor:pointer;color:'+offColor+'" title="Cliquer pour remettre à 0">'+offLabel+' ♩</button>'
       +'<button onclick="transpose(1)" style="width:36px;height:36px;border-radius:50%;border:1px solid rgba(255,140,0,0.35);background:rgba(255,140,0,0.1);color:#FF8C00;font-size:18px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">▲</button>'
+      +(off!==0?'<button onclick="saveTransposedChords()" style="padding:7px 10px;border-radius:10px;border:none;background:linear-gradient(135deg,#64FFDA,#00B894);color:#0a1628;font-size:11px;font-weight:900;cursor:pointer;flex-shrink:0;white-space:nowrap">💾 Sauver</button>':'')
     +'</div>';
   }
 
@@ -2867,7 +2902,7 @@ function renderRoom(){
         +[1,2,3,4].map(function(h){
           var active=S.freeHours===h;
           var col=h===4?'#FF4081':h===2?'#FF8C00':'#64FFDA';
-          return '<button onclick="S.freeHours='+h+';render()" '
+          return '<button onclick="setFreeHours('+h+')" '
             +'style="flex:1;padding:12px 4px;border-radius:11px;border:1.5px solid '+(active?col:'rgba(255,255,255,0.07)')+';background:'+(active?'rgba(255,255,255,0.07)':'transparent')+';color:'+(active?col:'rgba(200,230,220,0.3)')+';font-weight:900;font-size:15px;cursor:pointer">'+h+'H</button>';
         }).join('')
       +'</div>'
@@ -2992,9 +3027,9 @@ function renderSettings(){
       +'</div>'
       +'<div style="margin-bottom:12px"><label class="input-label">&#9200; ACCES GRATUIT AVANT PAIEMENT</label>'
         +'<div style="display:flex;gap:6px;margin-top:6px">'
-          +'<button onclick="S.freeHours=1;localStorage.setItem(\'rth-free-hours\',\'1\');render()" style="flex:1;padding:10px;border-radius:10px;border:2px solid '+(S.freeHours===1?'#64FFDA':'rgba(100,255,218,0.2)')+';background:'+(S.freeHours===1?'rgba(100,255,218,0.15)':'rgba(100,255,218,0.04)')+';color:'+(S.freeHours===1?'#64FFDA':'rgba(200,230,220,0.4)')+';font-weight:900;font-size:13px;cursor:pointer">1H</button>'
-          +'<button onclick="S.freeHours=2;localStorage.setItem(\'rth-free-hours\',\'2\');render()" style="flex:1;padding:10px;border-radius:10px;border:2px solid '+(S.freeHours===2?'#64FFDA':'rgba(100,255,218,0.2)')+';background:'+(S.freeHours===2?'rgba(100,255,218,0.15)':'rgba(100,255,218,0.04)')+';color:'+(S.freeHours===2?'#64FFDA':'rgba(200,230,220,0.4)')+';font-weight:900;font-size:13px;cursor:pointer">2H</button>'
-          +'<button onclick="S.freeHours=3;localStorage.setItem(\'rth-free-hours\',\'3\');render()" style="flex:1;padding:10px;border-radius:10px;border:2px solid '+(S.freeHours===3?'#64FFDA':'rgba(100,255,218,0.2)')+';background:'+(S.freeHours===3?'rgba(100,255,218,0.15)':'rgba(100,255,218,0.04)')+';color:'+(S.freeHours===3?'#64FFDA':'rgba(200,230,220,0.4)')+';font-weight:900;font-size:13px;cursor:pointer">3H</button>'
+          +'<button onclick="setFreeHours(1)" style="flex:1;padding:10px;border-radius:10px;border:2px solid '+(S.freeHours===1?'#64FFDA':'rgba(100,255,218,0.2)')+';background:'+(S.freeHours===1?'rgba(100,255,218,0.15)':'rgba(100,255,218,0.04)')+';color:'+(S.freeHours===1?'#64FFDA':'rgba(200,230,220,0.4)')+';font-weight:900;font-size:13px;cursor:pointer">1H</button>'
+          +'<button onclick="setFreeHours(2)" style="flex:1;padding:10px;border-radius:10px;border:2px solid '+(S.freeHours===2?'#64FFDA':'rgba(100,255,218,0.2)')+';background:'+(S.freeHours===2?'rgba(100,255,218,0.15)':'rgba(100,255,218,0.04)')+';color:'+(S.freeHours===2?'#64FFDA':'rgba(200,230,220,0.4)')+';font-weight:900;font-size:13px;cursor:pointer">2H</button>'
+          +'<button onclick="setFreeHours(3)" style="flex:1;padding:10px;border-radius:10px;border:2px solid '+(S.freeHours===3?'#64FFDA':'rgba(100,255,218,0.2)')+';background:'+(S.freeHours===3?'rgba(100,255,218,0.15)':'rgba(100,255,218,0.04)')+';color:'+(S.freeHours===3?'#64FFDA':'rgba(200,230,220,0.4)')+';font-weight:900;font-size:13px;cursor:pointer">3H</button>'
         +'</div>'
         +'<div style="font-size:10px;color:rgba(200,230,220,0.3);margin-top:6px">Les visiteurs voient les paroles gratuitement pendant ce temps. Ensuite, paiement requis.</div>'
       +'</div>'
@@ -3361,6 +3396,19 @@ function stopAdminTimer(){
   showToast('Acces gratuit termine ! Regenere le lien.');
 }
 function createRoom(){S.roomCode=Math.random().toString(36).substring(2,8).toUpperCase();try{localStorage.setItem(RK,S.roomCode);}catch(e){}showToast('Room : '+S.roomCode);render();}
+function setFreeHours(h){
+  S.freeHours=h;
+  try{localStorage.setItem('rth-free-hours',String(h));}catch(e){}
+  // Sauvegarder en Firestore → visiteurs reçoivent la mise à jour via onSnapshot
+  if(_fbAuth.currentUser){
+    _fbDoc.update({freeHours:h}).catch(function(){});
+    if(S.roomCode){
+      _fbDB.collection('rooms').doc(S.roomCode).update({freeHours:h}).catch(function(){});
+    }
+  }
+  render();
+}
+
 function saveAdminSettings(){
   S.adminName=(document.getElementById('set-admin')||{}).value||S.adminName;
   S.pricePerSong=parseInt((document.getElementById('set-price')||{}).value||S.pricePerSong)||100;
@@ -3440,38 +3488,6 @@ function cycleLyricsMode(){
 }
 
 // -- ÉDITION MANUELLE --
-// -- TRANSPOSITION EN MODE ÉDITION --
-function editTranspose(delta){
-  // Lire le contenu actuel du textarea (au cas où modifié à la main)
-  var ta=document.getElementById('edit-lyrics');
-  if(ta)S.editText=ta.value;
-  var hasChords=/\[[^\]]+\]/.test(S.editText);
-  if(!hasChords)return showToast('⚠️ Pas d\'accords à transposer — format [G]mot');
-  S.editText=transposeLyrics(S.editText,delta);
-  S.editTotalTranspose=S.editTotalTranspose+delta;
-  // Mettre à jour le textarea sans re-render complet
-  if(ta)ta.value=S.editText;
-  // Mettre à jour le label
-  var lbl=document.getElementById('edit-transpose-lbl');
-  if(lbl){
-    var t=S.editTotalTranspose;
-    lbl.textContent=(t===0?'Original':(t>0?'↑ +'+t:'↓ '+t))+' demi-tons';
-    lbl.style.color=t===0?'rgba(200,230,220,0.45)':(t>0?'#FF8C00':'#64B5FF');
-  }
-  var resetBtn=document.querySelector('#edit-transpose-bar button[onclick="editTransposeReset()"]');
-  if(resetBtn){
-    resetBtn.style.opacity=S.editTotalTranspose===0?'0.4':'1';
-    resetBtn.style.pointerEvents=S.editTotalTranspose===0?'none':'auto';
-  }
-  var msg=delta>0?'▲ +1 demi-ton':'▼ -1 demi-ton';
-  showToast(msg);
-}
-function editTransposeReset(){
-  if(S.editTotalTranspose===0)return;
-  // Annuler tous les demi-tons appliqués
-  editTranspose(-S.editTotalTranspose);
-  showToast('♩ Tonalité originale restaurée');
-}
 
 function openEdit(){
   if(!S.selected)return;
