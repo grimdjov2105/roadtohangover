@@ -679,23 +679,17 @@ function startFirestoreSync(){
       var lastKick=data.forceDisconnectAt||0;
       var joinTime=S.guestSession._sessionStart||S.guestSession.sessionStartTime||0;
       if(lastKick>joinTime){
-        // Kick de la session en cours SANS effacer le localStorage
-        // → visiteur peut revenir via refresh (rejoindre avec son code sauvegardé)
         S.guestSession=null;
         S.inGuestPerf=false;
         if(document.getElementById('perf-mode').classList.contains('show')){exitPerf();}
-        // Mettre à jour le _sessionStart dans localStorage pour éviter re-kick au refresh
+        // Supprimer complètement la session du localStorage → le visiteur ne re-rejoint PAS au refresh
         try{
-          var saved=localStorage.getItem('rth-guest-session');
-          if(saved){
-            var gs2=JSON.parse(saved);
-            gs2._sessionStart=Date.now(); // reset joinTime pour éviter re-kick
-            localStorage.setItem('rth-guest-session',JSON.stringify(gs2));
-          }
+          localStorage.removeItem('rth-guest-session');
+          localStorage.removeItem('rth-session-start');
         }catch(e){}
         S.view='visitor-home';
         render();
-        showToast('⛔ Déconnecté par l\'admin — rafraîchis pour rejoindre');
+        showToast('⛔ Session terminée par l\'admin');
         return;
       }
     }
