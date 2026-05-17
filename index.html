@@ -516,7 +516,8 @@ try{
   var _sl=localStorage.getItem(SLK); S.setlist=_sl?JSON.parse(_sl):[];
   S.adminName=localStorage.getItem(AK)||'';
   S.pricePerSong=parseInt(localStorage.getItem(PK)||'100')||100;
-  S.freeHours=parseInt(localStorage.getItem('rth-free-hours')||'3')||3;
+  S.freeHours=3; // Durée fixe 3H — on ignore le localStorage
+  try{localStorage.setItem('rth-free-hours','3');}catch(e){} // Nettoyer l'ancienne valeur
   S.payInfo=localStorage.getItem(PIK)||'';
   var _ul=localStorage.getItem(ULK); S.unlockedSongs=_ul?JSON.parse(_ul):[];
   S.paypalClientId=localStorage.getItem(PPID)||'';
@@ -1231,7 +1232,7 @@ function startPerf(){
   loadPerfSong(true);
   // 3. Sync Firestore → visiteurs : timer + performance + chansons débloquées
   syncPerfState(true);
-  showToast('🎤 Performance lancée — '+S.setlist.length+' chansons · '+(S.freeHours||3)+'H chrono !');
+  showToast('🎤 Performance lancée — '+S.setlist.length+' chansons · 3H chrono !');
 }
 function perfNext(){
   if(S.inGuestPerf){
@@ -2999,7 +3000,7 @@ function renderRoom(){
     return running
       ?'<div style="background:rgba(100,255,218,0.06);border:1px solid rgba(100,255,218,0.2);border-radius:12px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
           +'<div>'
-            +'<div style="font-size:10px;font-weight:900;color:#64FFDA;letter-spacing:1px">🟢 SESSION EN COURS · '+S.freeHours+'H</div>'
+            +'<div style="font-size:10px;font-weight:900;color:#64FFDA;letter-spacing:1px">🟢 SESSION EN COURS · 3H</div>'
             +'<div style="font-size:10px;color:rgba(200,230,220,0.4)">Fin à '+endStr+' · <button onclick="stopAdminTimer()" style="border:none;background:none;color:#FF6B6B;font-size:10px;font-weight:700;cursor:pointer;padding:0">■ Terminer</button></div>'
           +'</div>'
           +'<div id="admin-free-timer" style="font-size:22px;font-weight:900;color:#64FFDA;font-family:monospace">'+timerStr+'</div>'
