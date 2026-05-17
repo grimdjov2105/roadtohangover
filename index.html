@@ -540,36 +540,38 @@ try{
         S.guestVerifying=true; // bloque renderGuest() jusqu'à confirmation Firestore
         S.view='guest';
         var _gsStart=_gsParsed.sessionStartTime||_gsParsed._sessionStart||0;
-        // Vérifier Firestore AVANT d'autoriser l'accès
-        _fbDoc.get().then(function(doc){
+        // Vérifier Firestore AVANT d'autoriser l'accès — FORCER lecture serveur (bypass cache)
+        _fbDoc.get({source:'server'}).then(function(doc){
           S.guestVerifying=false;
           if(!doc.exists||S.mode==='admin'){render();return;}
           var d=doc.data();
           var fsStart=typeof d.sessionStartTime==='number'?d.sessionStartTime:_gsStart;
           var fsFreeHours=d.freeHours||_gsParsed.freeHours||3;
           var fsFreeMs=fsFreeHours*3600000;
-          // Écraser localStorage avec les vraies valeurs Firestore
+          var fsLocked=d.sessionLocked===true; // flag explicite de verrouillage
+          // Écraser localStorage avec les vraies valeurs serveur
           if(S.guestSession){
             S.guestSession.sessionStartTime=fsStart;
             S.guestSession.freeHours=fsFreeHours;
+            S.guestSession.sessionLocked=fsLocked;
             try{localStorage.setItem('rth-guest-session',JSON.stringify(S.guestSession));}catch(e){}
-          }
-          // Si expiré selon Firestore → supprimer du localStorage
-          var fsExpired=fsStart===0||(Date.now()-fsStart)>fsFreeMs;
-          if(fsExpired){
-            // Garder guestSession pour afficher le bandeau "session terminée" + bouton don
-            // mais effacer l'accès gratuit du localStorage
-            try{
-              var saved=JSON.parse(localStorage.getItem('rth-guest-session')||'{}');
-              saved.sessionStartTime=fsStart; // valeur expirée de Firestore
-              localStorage.setItem('rth-guest-session',JSON.stringify(saved));
-            }catch(e){}
           }
           if(S.view==='guest')render();
         }).catch(function(){
-          // Réseau indisponible → utiliser la valeur locale (mieux que rien)
-          S.guestVerifying=false;
-          if(S.view==='guest')render();
+          // Réseau indisponible → fallback sur cache local
+          _fbDoc.get().then(function(doc2){
+            S.guestVerifying=false;
+            if(doc2.exists&&S.mode!=='admin'){
+              var d2=doc2.data();
+              var fsStart2=typeof d2.sessionStartTime==='number'?d2.sessionStartTime:_gsStart;
+              if(S.guestSession){
+                S.guestSession.sessionStartTime=fsStart2;
+                try{localStorage.setItem('rth-guest-session',JSON.stringify(S.guestSession));}catch(e){}
+              }
+            }
+            S.guestVerifying=false;
+            if(S.view==='guest')render();
+          }).catch(function(){S.guestVerifying=false;if(S.view==='guest')render();});
         });
       } else {
         localStorage.removeItem('rth-guest-session');
@@ -640,12 +642,11 @@ function startFirestoreSync(){
     }
     if(typeof data.sessionStartTime==='number'){
       S.sessionStartTime=data.sessionStartTime;
-      // Propager au guestSession → met à jour le timer visiteur immédiatement
       if(S.mode!=='admin'&&S.guestSession){
         S.guestSession.sessionStartTime=data.sessionStartTime;
         S.guestSession.freeHours=data.freeHours||S.guestSession.freeHours;
+        if(typeof data.sessionLocked==='boolean')S.guestSession.sessionLocked=data.sessionLocked;
         try{localStorage.setItem('rth-guest-session',JSON.stringify(S.guestSession));}catch(e){}
-        // Forcer un re-render si on est sur la vue session (pour afficher le bandeau expiré)
         if(S.view==='guest')render();
       }
     }
@@ -1236,8 +1237,13 @@ function startPerf(){
     S.sessionStartTime=now;
     try{
       localStorage.setItem('rth-session-start-admin',String(S.sessionStartTime));
-      localStorage.setItem('rth-free-hours',String(S.freeHours||3));
+      localStorage.setItem('rth-free-hours','3');
     }catch(e){}
+    // Déverrouiller la session dans Firestore (efface le sessionLocked posé par stopAdminTimer)
+    if(_fbAuth.currentUser){
+      _fbDoc.update({sessionLocked:false,sessionStartTime:now,freeHours:3}).catch(function(){});
+      if(S.roomCode){_fbDB.collection('rooms').doc(S.roomCode).update({sessionLocked:false,sessionStartTime:now,freeHours:3}).catch(function(){});}
+    }
   }
   // 2. Ouvrir la performance admin directement
   S.perfIndex=0; PF.elapsed=0; PF.idx=-1; PF.words=[]; S.transposeOffset=0;
@@ -1682,10 +1688,10 @@ function renderGuest(){
   var songs=gs.songs||[];
   var freeMs=(gs.freeHours||3)*3600*1000;
   var sessionStart=gs.sessionStartTime||gs._sessionStart||0;
-  // Si sessionStart=0 → session pas encore démarrée par l'admin → chansons verrouillées
   var sessionNotStarted=(sessionStart===0);
   var elapsed=sessionStart>0?(Date.now()-sessionStart):0;
-  var freeExpired=sessionNotStarted||(elapsed>freeMs);
+  // sessionLocked = flag explicite posé par stopAdminTimer() → verrouillage immédiat
+  var freeExpired=gs.sessionLocked===true||sessionNotStarted||(elapsed>freeMs);
   var timeLeft=Math.max(0,freeMs-elapsed);
   var tlH=Math.floor(timeLeft/3600000);
   var tlM=Math.floor((timeLeft%3600000)/60000);
@@ -3544,27 +3550,26 @@ function startAdminTimer(hours){
   showToast('Timer '+S.freeHours+'h lance ! Regenere le lien.');
 }
 function stopAdminTimer(){
-  // Mettre sessionStartTime dans le passé lointain → session expirée immédiatement
   var expiredTs=Date.now()-(S.freeHours||3)*3600000-1000;
   S.sessionStartTime=expiredTs;
   try{localStorage.setItem('rth-session-start-admin',String(S.sessionStartTime));}catch(e){}
   S.shortLink='';S.shortCode='';
   try{localStorage.removeItem('rth-short-link');localStorage.removeItem('rth-short-code');}catch(e){}
   if(_fbAuth.currentUser){
-    // Sync rth/data → onSnapshot visiteur reçoit et verrouille immédiatement
     var expiredData={
       sessionStartTime:expiredTs,
-      freeHours:S.freeHours||3,
+      freeHours:3,
+      sessionLocked:true,
       updatedAt:firebase.firestore.FieldValue.serverTimestamp()
     };
     _fbDoc.update(expiredData).catch(function(){
       _fbDoc.set(Object.assign({songs:S.songs,setlist:S.setlist},expiredData)).catch(function(){});
     });
-    // Sync rooms/{CODE} → pour les visiteurs qui rejoignent ensuite
     if(S.roomCode){
       _fbDB.collection('rooms').doc(S.roomCode).update({
         sessionStartTime:expiredTs,
-        freeHours:S.freeHours||3
+        freeHours:3,
+        sessionLocked:true
       }).catch(function(){});
     }
   }
