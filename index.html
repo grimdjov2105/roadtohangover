@@ -651,8 +651,28 @@ function startFirestoreSync(){
       }
     }
     if(typeof data.freeHours==='number'){
-      if(S.mode!=='admin'){S.freeHours=data.freeHours;} // visiteur : respecter la valeur Firestore
-      // admin : toujours 3H — ne pas écraser avec une ancienne valeur Firestore
+      if(S.mode!=='admin'){S.freeHours=data.freeHours;}
+    }
+    // -- Nouveau code room généré par l'admin → visiteurs suivent automatiquement --
+    if(S.mode!=='admin'&&S.guestSession&&data.roomCode&&data.roomCode!==S.guestSession.code){
+      // L'admin a généré un nouveau code → re-joindre la nouvelle room silencieusement
+      var newCode=data.roomCode;
+      _fbDB.collection('rooms').doc(newCode).get().then(function(roomDoc){
+        if(!roomDoc.exists)return;
+        var rd=roomDoc.data();
+        if(!rd||!rd.songs)return;
+        // Mettre à jour le guestSession avec le nouveau code et les nouvelles données
+        S.guestSession=Object.assign({},S.guestSession,{
+          code:newCode,
+          songs:rd.songs||S.guestSession.songs,
+          sessionStartTime:rd.sessionStartTime||data.sessionStartTime||0,
+          freeHours:rd.freeHours||3,
+          sessionLocked:rd.sessionLocked||false
+        });
+        try{localStorage.setItem('rth-guest-session',JSON.stringify(S.guestSession));}catch(e){}
+        if(S.view==='guest')render();
+        showToast('🔄 Session mise à jour — code : '+newCode);
+      }).catch(function(){});
     }
     // -- Force déconnexion visiteurs --
     if(S.mode!=='admin'&&S.guestSession&&data.forceDisconnect){
@@ -772,7 +792,8 @@ function save(){
       sessions:S.sessions,
       activeSession:S.activeSession,
       sessionStartTime:S.sessionStartTime||0,
-      freeHours:S.freeHours||3,
+      freeHours:3,
+      roomCode:S.roomCode||'',
       updatedAt:firebase.firestore.FieldValue.serverTimestamp()
     }).catch(function(e){console.warn('Firestore save err:',e);});
   }
@@ -2482,12 +2503,15 @@ function shareWhatsApp(){
   });
 }
 function generateShortCode(){
-  // Toujours générer un nouveau code room
   S.roomCode=Math.random().toString(36).substring(2,8).toUpperCase();
   try{localStorage.setItem(RK,S.roomCode);}catch(e){}
   S.shortCode='';S.shortLink='';
   var btn=document.getElementById('btn-gen-code');
   if(btn){btn.innerHTML='⏳...';btn.disabled=true;}
+  // Pousser le nouveau code dans rth/data → visiteurs existants reçoivent via onSnapshot
+  if(_fbAuth.currentUser){
+    _fbDoc.update({roomCode:S.roomCode,sessionLocked:false}).catch(function(){});
+  }
   saveRoomToFirestore(S.roomCode).then(function(){
     var url=getRoomURL();
     S.shortLink=url;
@@ -3124,8 +3148,8 @@ function renderRoom(){
         +'<div style="display:flex;gap:6px;flex-shrink:0">'
           +(cnt>0&&!isDisplayed?'<button onclick="displaySession('+si+')" style="padding:7px 10px;border-radius:9px;border:1px solid rgba(255,140,0,0.3);background:rgba(255,140,0,0.07);color:#FF8C00;font-size:11px;font-weight:700;cursor:pointer">📺</button>':'')
           +'<button onclick="showSessionPreview('+si+')" style="padding:7px 12px;border-radius:9px;border:1px solid rgba(100,255,218,0.18);background:transparent;color:rgba(100,255,218,0.6);font-size:12px;font-weight:700;cursor:pointer">👁</button>'
-          +(isActive&&S.sessionStartTime>0&&(Date.now()-S.sessionStartTime)<(S.freeHours||3)*3600000
-            ?'<button onclick="stopAdminTimer()" style="padding:7px 10px;border-radius:9px;border:1px solid rgba(255,100,100,0.35);background:rgba(255,100,100,0.1);color:#FF6B6B;font-size:11px;font-weight:900;cursor:pointer" title="Terminer la session maintenant">⏹</button>'
+          +(isActive&&S.sessionStartTime>0
+            ?'<button onclick="stopAdminTimer()" style="padding:7px 10px;border-radius:9px;border:1px solid rgba(255,100,100,0.35);background:rgba(255,100,100,0.1);color:#FF6B6B;font-size:11px;font-weight:900;cursor:pointer" title="Terminer la session">⏹</button>'
             :'')
           +(cnt>0
             ?'<button onclick="launchSession('+si+')" style="padding:7px 12px;border-radius:9px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-size:12px;font-weight:900;cursor:pointer;box-shadow:0 3px 10px rgba(255,140,0,0.2)">🎤</button>'
@@ -3456,7 +3480,13 @@ function toggleSL(id, sessionIdx){
 }
 function moveUp(i){if(i===0)return;var t=S.setlist[i-1];S.setlist[i-1]=S.setlist[i];S.setlist[i]=t;saveSL();render();}
 function moveDown(i){if(i>=S.setlist.length-1)return;var t=S.setlist[i+1];S.setlist[i+1]=S.setlist[i];S.setlist[i]=t;saveSL();render();}
-function newSession(){S.setlist=[];saveSL();S.roomCode=Math.random().toString(36).substring(2,8).toUpperCase();try{localStorage.setItem(RK,S.roomCode);}catch(e){}showToast('🔄 Nouvelle session — Room : '+S.roomCode);render();}
+function newSession(){
+  S.setlist=[];saveSL();
+  S.roomCode=Math.random().toString(36).substring(2,8).toUpperCase();
+  try{localStorage.setItem(RK,S.roomCode);}catch(e){}
+  if(_fbAuth.currentUser){_fbDoc.update({roomCode:S.roomCode,sessionLocked:false}).catch(function(){});}
+  showToast('🔄 Nouvelle session — Room : '+S.roomCode);render();
+}
 
 function forceDisconnectAll(){
   if(!_fbAuth.currentUser)return;
