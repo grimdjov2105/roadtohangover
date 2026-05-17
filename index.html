@@ -234,13 +234,15 @@
 
 <div id="qr-modal" onclick="if(event.target===this)closeQRModal()">
   <div id="qr-box">
-    <div style="font-size:11px;font-weight:900;letter-spacing:1.5px;color:rgba(200,230,220,0.4)">CODE SESSION</div>
+    <div style="font-size:11px;font-weight:900;letter-spacing:1.5px;color:rgba(200,230,220,0.4)">CODE SESSION — VISITEURS</div>
     <div id="qr-code-label" style="font-size:36px;font-weight:900;letter-spacing:8px;color:#FF8C00;text-align:center"></div>
     <div id="qr-canvas-wrap"><div id="qr-canvas"></div></div>
-    <div style="font-size:11px;color:rgba(200,230,220,0.4);text-align:center;line-height:1.8">Scanne avec ton téléphone<br/>pour rejoindre la session 🌊</div>
+    <div style="font-size:10px;color:rgba(200,230,220,0.35);text-align:center;line-height:1.8">Scanne pour rejoindre · ou partage le lien</div>
+    <div id="qr-url-display" style="font-size:10px;color:#64FFDA;text-align:center;word-break:break-all;background:rgba(100,255,218,0.06);border:1px solid rgba(100,255,218,0.15);border-radius:8px;padding:6px 10px;width:100%"></div>
     <div style="display:flex;gap:8px;width:100%">
-      <button onclick="navigator.clipboard.writeText(document.getElementById('qr-code-label').textContent).then(function(){showToast('✅ Code copié !');closeQRModal();})" style="flex:1;padding:11px;border-radius:12px;border:1px solid rgba(100,255,218,0.3);background:rgba(100,255,218,0.08);color:#64FFDA;font-weight:700;font-size:13px;cursor:pointer">📋 Copier</button>
-      <button onclick="closeQRModal()" style="flex:1;padding:11px;border-radius:12px;border:1px solid rgba(255,100,100,0.3);background:rgba(255,100,100,0.08);color:#FF6B6B;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
+      <button onclick="copyQRLink()" style="flex:1;padding:11px;border-radius:12px;border:1px solid rgba(100,255,218,0.3);background:rgba(100,255,218,0.08);color:#64FFDA;font-weight:700;font-size:13px;cursor:pointer">📋 Copier lien</button>
+      <button onclick="shareQRLink()" style="flex:1;padding:11px;border-radius:12px;border:none;background:linear-gradient(135deg,#64FFDA,#00B894);color:#0a1628;font-weight:900;font-size:13px;cursor:pointer">📤 Partager</button>
+      <button onclick="closeQRModal()" style="padding:11px 14px;border-radius:12px;border:1px solid rgba(255,100,100,0.3);background:rgba(255,100,100,0.08);color:#FF6B6B;font-weight:700;font-size:13px;cursor:pointer">✕</button>
     </div>
   </div>
 </div>
@@ -631,13 +633,15 @@ function startFirestoreSync(){
     // -- Sync performance admin → visiteurs --
     if(S.mode!=='admin'&&S.guestSession){
       if(data.perfActive===true&&typeof data.perfIndex==='number'){
-        // Utiliser les chansons fraîches de Firestore (session active de l'admin)
-        // et pas les chansons au moment du join (qui peuvent être d'une autre session)
-        if(data.songs&&Array.isArray(data.songs)&&data.songs.length>0){
-          S.guestSession.songs=data.songs;
+        // Utiliser perfSongs (ordre setlist) si disponible, sinon songs
+        // CRUCIAL : perfSongs est dans l'ordre de la setlist, songs est la bibliothèque complète
+        var freshSongs=(data.perfSongs&&Array.isArray(data.perfSongs)&&data.perfSongs.length>0)
+          ? data.perfSongs
+          : (data.songs&&Array.isArray(data.songs)&&data.songs.length>0 ? data.songs : null);
+        if(freshSongs){
+          S.guestSession.songs=freshSongs;
           S.guestSession.sessionStartTime=data.sessionStartTime||S.guestSession.sessionStartTime;
           S.guestSession.freeHours=data.freeHours||S.guestSession.freeHours;
-          // Mettre à jour localStorage pour le prochain refresh
           try{localStorage.setItem('rth-guest-session',JSON.stringify(S.guestSession));}catch(e){}
         }
         S.guestPerfSongs=S.guestSession.songs||[];
@@ -1314,13 +1318,18 @@ function perfTransposeReset(){
 // -- SYNC ÉTAT PERFORMANCE VERS VISITEURS --
 function syncPerfState(active){
   if(!_fbAuth.currentUser)return;
+  // Construire les chansons dans l'ordre de la setlist (crucial pour sync visiteur)
+  var setlistSongs=S.setlist.map(function(id){
+    return S.songs.find(function(sg){return sg.id===id;});
+  }).filter(Boolean);
   var perfData={
     perfActive:active,
     perfIndex:active?S.perfIndex:0,
     perfTranspose:active?S.transposeOffset:0,
     perfChangedAt:Date.now(),
     sessionStartTime:S.sessionStartTime||0,
-    freeHours:S.freeHours||2
+    freeHours:S.freeHours||2,
+    perfSongs:active?setlistSongs:[]  // songs dans l'ordre setlist pour sync visiteur
   };
   _fbDoc.update(perfData).catch(function(){
     _fbDoc.set(Object.assign({
@@ -1330,20 +1339,15 @@ function syncPerfState(active){
   });
   // Sync rooms → inclut songs+setlist de la session active pour les visiteurs
   if(S.roomCode){
-    // Construire la liste des chansons de la setlist active
-    var setlistSongs=S.setlist.map(function(id){
-      return S.songs.find(function(sg){return sg.id===id;});
-    }).filter(Boolean);
     _fbDB.collection('rooms').doc(S.roomCode).update(Object.assign({
       perfActive:active,
       perfIndex:active?S.perfIndex:0,
       perfTranspose:active?S.transposeOffset:0,
       sessionStartTime:S.sessionStartTime||0,
       freeHours:S.freeHours||2,
-      songs:setlistSongs,        // chansons de la session active
+      songs:setlistSongs,        // chansons de la session active (ordre setlist)
       setlist:S.setlist          // ordre setlist
     },{})).catch(function(){
-      // Si le doc n'existe pas encore, le créer
       saveRoomToFirestore(S.roomCode).catch(function(){});
     });
   }
@@ -1455,10 +1459,14 @@ function getSessionURLLight(){
     return window.location.origin+'?s='+encoded;
   }catch(e){return null;}
 }
+var _currentQrUrl='';
 function showQRModal(code){
   if(!code)return showToast('Crée une session d\'abord !');
   var roomUrl=window.location.origin+window.location.pathname+'?room='+code;
+  _currentQrUrl=roomUrl;
   document.getElementById('qr-code-label').textContent=code;
+  var urlEl=document.getElementById('qr-url-display');
+  if(urlEl)urlEl.textContent=roomUrl;
   var wrap=document.getElementById('qr-canvas');
   wrap.innerHTML='';
   document.getElementById('qr-modal').classList.add('show');
@@ -1474,7 +1482,6 @@ function showQRModal(code){
         correctLevel:QRCode.CorrectLevel.M
       });
     }catch(e){
-      // Fallback si qrcodejs échoue : api externe
       var img=document.createElement('img');
       var s=200;
       img.style.cssText='border-radius:8px;width:'+s+'px;height:'+s+'px';
@@ -1482,6 +1489,21 @@ function showQRModal(code){
       wrap.appendChild(img);
     }
   });
+}
+function copyQRLink(){
+  if(!_currentQrUrl)return;
+  navigator.clipboard.writeText(_currentQrUrl)
+    .then(function(){showToast('✅ Lien visiteur copié !');})
+    .catch(function(){showToast('Lien : '+_currentQrUrl);});
+}
+function shareQRLink(){
+  if(!_currentQrUrl)return;
+  if(navigator.share){
+    navigator.share({title:'Session RTH — Rejoins-nous !',text:'Clique pour rejoindre la session musicale 🎸',url:_currentQrUrl})
+      .catch(function(){});
+  } else {
+    copyQRLink();
+  }
 }
 function closeQRModal(){
   document.getElementById('qr-modal').classList.remove('show');
