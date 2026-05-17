@@ -582,11 +582,14 @@ _fbAuth.onAuthStateChanged(function(user){
     // Admin connecté → activer mode admin
     if(S.mode!=='admin'){
       S.mode='admin';
+      S.freeHours=3; // Toujours 3H, quoi qu'il y ait dans Firestore
       startFirestoreSync();
+      // Forcer freeHours:3 dans Firestore → écrase toute ancienne valeur (1H, 2H...)
+      _fbDoc.update({freeHours:3}).catch(function(){});
+      if(S.roomCode){_fbDB.collection('rooms').doc(S.roomCode).update({freeHours:3}).catch(function(){});}
       // Si timer encore actif → afficher directement la vue room
       var now=Date.now();
-      var freeMs=(S.freeHours||3)*3600000;
-      var timerActif=S.sessionStartTime>0&&(now-S.sessionStartTime)<freeMs;
+      var timerActif=S.sessionStartTime>0&&(now-S.sessionStartTime)<10800000; // 3H fixe
       if(timerActif) S.view='room';
       render();
       showToast('👑 Reconnecté automatiquement !');
@@ -635,7 +638,10 @@ function startFirestoreSync(){
         if(S.view==='guest')render();
       }
     }
-    if(typeof data.freeHours==='number')S.freeHours=data.freeHours;
+    if(typeof data.freeHours==='number'){
+      if(S.mode!=='admin'){S.freeHours=data.freeHours;} // visiteur : respecter la valeur Firestore
+      // admin : toujours 3H — ne pas écraser avec une ancienne valeur Firestore
+    }
     // -- Force déconnexion visiteurs --
     if(S.mode!=='admin'&&S.guestSession&&data.forceDisconnect){
       var lastKick=data.forceDisconnectAt||0;
