@@ -2500,11 +2500,22 @@ function generateShortCode(){
   S.roomCode=Math.random().toString(36).substring(2,8).toUpperCase();
   try{localStorage.setItem(RK,S.roomCode);}catch(e){}
   S.shortCode='';S.shortLink='';
+  // Terminer la session active + déconnecter tous les visiteurs
+  var expiredTs=Date.now()-10800001; // 3H dans le passé → session expirée
+  S.sessionStartTime=expiredTs;
+  try{localStorage.setItem('rth-session-start-admin',String(expiredTs));}catch(e){}
   var btn=document.getElementById('btn-gen-code');
   if(btn){btn.innerHTML='⏳...';btn.disabled=true;}
-  // Pousser le nouveau code dans rth/data → visiteurs existants reçoivent via onSnapshot
   if(_fbAuth.currentUser){
-    _fbDoc.update({roomCode:S.roomCode,sessionLocked:false}).catch(function(){});
+    var resetData={
+      forceDisconnect:true,
+      forceDisconnectAt:Date.now(),
+      roomCode:S.roomCode,
+      sessionStartTime:expiredTs,
+      freeHours:3,
+      sessionLocked:true
+    };
+    _fbDoc.update(resetData).catch(function(){});
   }
   saveRoomToFirestore(S.roomCode).then(function(){
     var url=getRoomURL();
@@ -2512,13 +2523,10 @@ function generateShortCode(){
     try{localStorage.setItem('rth-short-link',url);}catch(e){}
     render();
     navigator.clipboard.writeText(url)
-      .then(function(){showToast('✅ Nouveau code : '+S.roomCode+' — Lien copié !');})
+      .then(function(){showToast('✅ Nouveau code '+S.roomCode+' — Session terminée, visiteurs déconnectés');})
       .catch(function(){showToast('✅ Nouveau code : '+S.roomCode);});
   }).catch(function(){
-    var url=getRoomURL();
-    S.shortLink=url;
-    render();
-    showToast('✅ Code : '+S.roomCode);
+    var url=getRoomURL();S.shortLink=url;render();showToast('✅ Code : '+S.roomCode);
   });
 }
 function checkVisitorJoin(){
@@ -3478,8 +3486,13 @@ function newSession(){
   S.setlist=[];saveSL();
   S.roomCode=Math.random().toString(36).substring(2,8).toUpperCase();
   try{localStorage.setItem(RK,S.roomCode);}catch(e){}
-  if(_fbAuth.currentUser){_fbDoc.update({roomCode:S.roomCode,sessionLocked:false}).catch(function(){});}
-  showToast('🔄 Nouvelle session — Room : '+S.roomCode);render();
+  var expiredTs=Date.now()-10800001;
+  S.sessionStartTime=expiredTs;
+  try{localStorage.setItem('rth-session-start-admin',String(expiredTs));}catch(e){}
+  if(_fbAuth.currentUser){
+    _fbDoc.update({forceDisconnect:true,forceDisconnectAt:Date.now(),roomCode:S.roomCode,sessionStartTime:expiredTs,freeHours:3,sessionLocked:true}).catch(function(){});
+  }
+  showToast('🔄 Nouvelle session — visiteurs déconnectés');render();
 }
 
 function forceDisconnectAll(){
