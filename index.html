@@ -539,6 +539,26 @@ try{
       if(!_gsExpired&&_gsParsed.code){
         S.guestSession=_gsParsed;
         S.view='guest';
+        // Valider immédiatement contre Firestore — évite d'afficher le timer si la session
+        // a été terminée par l'admin pendant que le visiteur était hors ligne
+        _fbDoc.get().then(function(doc){
+          if(!doc.exists||S.mode==='admin')return;
+          var d=doc.data();
+          if(typeof d.sessionStartTime==='number'&&S.guestSession){
+            var fsStart=d.sessionStartTime;
+            var fsFreeHours=d.freeHours||S.guestSession.freeHours||2;
+            var fsFreeMs=fsFreeHours*3600000;
+            // Mettre à jour avec les vraies valeurs Firestore
+            S.guestSession.sessionStartTime=fsStart;
+            S.guestSession.freeHours=fsFreeHours;
+            try{localStorage.setItem('rth-guest-session',JSON.stringify(S.guestSession));}catch(e){}
+            // Si expiré selon Firestore → re-render pour afficher le bandeau
+            var fsExpired=fsStart===0||(Date.now()-fsStart)>fsFreeMs;
+            if(fsExpired||fsStart!==_gsStart){
+              if(S.view==='guest')render();
+            }
+          }
+        }).catch(function(){});
       } else {
         localStorage.removeItem('rth-guest-session');
       }
@@ -603,7 +623,17 @@ function startFirestoreSync(){
     if(typeof data.activeSession==='number'&&data.activeSession!==S.activeSession){
       S.activeSession=data.activeSession;changed=true;
     }
-    if(typeof data.sessionStartTime==='number')S.sessionStartTime=data.sessionStartTime;
+    if(typeof data.sessionStartTime==='number'){
+      S.sessionStartTime=data.sessionStartTime;
+      // Propager au guestSession → met à jour le timer visiteur immédiatement
+      if(S.mode!=='admin'&&S.guestSession){
+        S.guestSession.sessionStartTime=data.sessionStartTime;
+        S.guestSession.freeHours=data.freeHours||S.guestSession.freeHours;
+        try{localStorage.setItem('rth-guest-session',JSON.stringify(S.guestSession));}catch(e){}
+        // Forcer un re-render si on est sur la vue session (pour afficher le bandeau expiré)
+        if(S.view==='guest')render();
+      }
+    }
     if(typeof data.freeHours==='number')S.freeHours=data.freeHours;
     // -- Force déconnexion visiteurs --
     if(S.mode!=='admin'&&S.guestSession&&data.forceDisconnect){
@@ -2161,7 +2191,7 @@ setInterval(function(){
     } else if(S.view==='room'){render();}
   }
   // Rafraichir le timer acces gratuit session visiteur
-  if(S.mode!=='admin'&&S.guestSession&&S.view==='guest-session'){
+  if(S.mode!=='admin'&&S.guestSession&&S.view==='guest'){
     var gsFreeMs=(S.guestSession.freeHours||2)*3600000;
     var gsStart=S.guestSession.sessionStartTime||S.guestSession._sessionStart||0;
     if(gsStart>0){
@@ -3495,16 +3525,32 @@ function startAdminTimer(hours){
   showToast('Timer '+S.freeHours+'h lance ! Regenere le lien.');
 }
 function stopAdminTimer(){
-  S.sessionStartTime=Date.now()-(S.freeHours||2)*3600000-1;
+  // Mettre sessionStartTime dans le passé lointain → session expirée immédiatement
+  var expiredTs=Date.now()-(S.freeHours||2)*3600000-1000;
+  S.sessionStartTime=expiredTs;
   try{localStorage.setItem('rth-session-start-admin',String(S.sessionStartTime));}catch(e){}
   S.shortLink='';S.shortCode='';
   try{localStorage.removeItem('rth-short-link');localStorage.removeItem('rth-short-code');}catch(e){}
-  // Sync Firestore
   if(_fbAuth.currentUser){
-    _fbDoc.set({songs:S.songs,setlist:S.setlist,sessionStartTime:S.sessionStartTime,freeHours:S.freeHours,updatedAt:firebase.firestore.FieldValue.serverTimestamp()}).catch(function(){});
+    // Sync rth/data → onSnapshot visiteur reçoit et verrouille immédiatement
+    var expiredData={
+      sessionStartTime:expiredTs,
+      freeHours:S.freeHours||2,
+      updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+    };
+    _fbDoc.update(expiredData).catch(function(){
+      _fbDoc.set(Object.assign({songs:S.songs,setlist:S.setlist},expiredData)).catch(function(){});
+    });
+    // Sync rooms/{CODE} → pour les visiteurs qui rejoignent ensuite
+    if(S.roomCode){
+      _fbDB.collection('rooms').doc(S.roomCode).update({
+        sessionStartTime:expiredTs,
+        freeHours:S.freeHours||2
+      }).catch(function(){});
+    }
   }
   render();
-  showToast('Acces gratuit termine ! Regenere le lien.');
+  showToast('🔒 Session terminée — visiteurs verrouillés');
 }
 function createRoom(){S.roomCode=Math.random().toString(36).substring(2,8).toUpperCase();try{localStorage.setItem(RK,S.roomCode);}catch(e){}showToast('Room : '+S.roomCode);render();}
 function setFreeHours(h){
