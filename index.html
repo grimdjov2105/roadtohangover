@@ -322,6 +322,15 @@
   <!-- Progress bar -->
   <div id="perf-progress-wrap"><div id="perf-progress-fill" style="width:0%"></div></div>
 
+  <!-- Transpose bar (admin only) -->
+  <div id="perf-transpose-bar" style="display:none;flex-shrink:0;padding:5px 12px 5px;background:rgba(0,0,0,0.35);border-bottom:1px solid rgba(255,255,255,0.05);align-items:center;gap:8px">
+    <span style="font-size:9px;font-weight:900;letter-spacing:1.5px;color:rgba(200,230,220,0.35);flex-shrink:0">♩ TON</span>
+    <button onclick="perfTranspose(-1)" style="width:30px;height:30px;border-radius:50%;border:1px solid rgba(100,181,255,0.4);background:rgba(100,181,255,0.1);color:#64B5FF;font-size:15px;font-weight:900;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center">▼</button>
+    <button onclick="perfTransposeReset()" id="perf-transpose-lbl" style="flex:1;padding:5px 8px;border-radius:9px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);font-size:13px;font-weight:900;cursor:pointer;color:#e8f4f8;text-align:center">0 ♩</button>
+    <button onclick="perfTranspose(1)" style="width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,140,0,0.4);background:rgba(255,140,0,0.1);color:#FF8C00;font-size:15px;font-weight:900;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center">▲</button>
+    <span id="perf-transpose-note" style="font-size:10px;font-weight:900;color:rgba(200,230,220,0.5);flex-shrink:0;min-width:28px;text-align:right"></span>
+  </div>
+
   <!-- Karaoke area -->
   <div id="perf-karaoke"></div>
 
@@ -468,7 +477,7 @@ var S={
   setlist:[],perfIndex:0,
   karaokeMode:false,karaokeWords:[],karaokeIdx:-1,
   lyricsMode:'lyrics',
-  editMode:false,editTitle:'',editArtist:'',editBpm:'',editText:'',
+  editMode:false,editTitle:'',editArtist:'',editBpm:'',editText:'',editTotalTranspose:0,
   ukeTab:'Majeur', searchQ:'', sortMode:'default',
   transposeOffset:0,
   guestSession:null,
@@ -619,16 +628,16 @@ function startFirestoreSync(){
     if(S.mode!=='admin'&&S.guestSession){
       if(data.perfActive===true&&typeof data.perfIndex==='number'){
         // Utiliser les chansons fraîches de Firestore (session active de l'admin)
-        // currentSongs = songs filtrées de la setlist active (pas toute la bibliothèque)
-        var freshSongs=data.currentSongs||data.songs;
-        if(freshSongs&&Array.isArray(freshSongs)&&freshSongs.length>0){
-          S.guestSession.songs=freshSongs;
+        // et pas les chansons au moment du join (qui peuvent être d'une autre session)
+        if(data.songs&&Array.isArray(data.songs)&&data.songs.length>0){
+          S.guestSession.songs=data.songs;
           S.guestSession.sessionStartTime=data.sessionStartTime||S.guestSession.sessionStartTime;
           S.guestSession.freeHours=data.freeHours||S.guestSession.freeHours;
+          // Mettre à jour localStorage pour le prochain refresh
           try{localStorage.setItem('rth-guest-session',JSON.stringify(S.guestSession));}catch(e){}
         }
         S.guestPerfSongs=S.guestSession.songs||[];
-        handleGuestPerfSync(data.perfIndex, data.sessionStartTime, data.freeHours);
+        handleGuestPerfSync(data.perfIndex, data.sessionStartTime, data.freeHours, data.perfTranspose||0);
       } else if(data.perfActive===false){
         if(document.getElementById('perf-mode').classList.contains('show')){
           exitPerf();
@@ -1088,7 +1097,9 @@ function loadPerfSong(autoStart){
   }
   stopPerfTimer();
   PF.elapsed=0; PF.idx=-1;
-  PF.words=buildPerfWords(song);
+  // Appliquer la transposition de session avant karaoké
+  var songToPlay=(S.transposeOffset!==0)?Object.assign({},song,{chordLyrics:transposeLyrics(song.chordLyrics,S.transposeOffset)}):song;
+  PF.words=buildPerfWords(songToPlay);
 
   var zone=document.getElementById('perf-karaoke');
   if(zone){
@@ -1173,11 +1184,12 @@ function startPerf(){
     }catch(e){}
   }
   // 2. Ouvrir la performance admin directement
-  S.perfIndex=0; PF.elapsed=0; PF.idx=-1; PF.words=[];
+  S.perfIndex=0; PF.elapsed=0; PF.idx=-1; PF.words=[]; S.transposeOffset=0;
   if(PF.countTimer){clearTimeout(PF.countTimer);PF.countTimer=null;}
   var ov=document.getElementById('perf-overlay');
   if(ov)ov.classList.remove('show');
   document.getElementById('perf-mode').classList.add('show');
+  refreshPerfTransposeBar();
   loadPerfSong(true);
   // 3. Sync Firestore → visiteurs : timer + performance + chansons débloquées
   syncPerfState(true);
@@ -1200,6 +1212,8 @@ function perfNext(){
   if(ov)ov.classList.remove('show');
   stopPerfTimer();
   S.perfIndex++;
+  S.transposeOffset=0;
+  refreshPerfTransposeBar();
   loadPerfSong(false);
   syncPerfState(true);
 }
@@ -1220,6 +1234,8 @@ function perfPrev(){
   if(ov)ov.classList.remove('show');
   stopPerfTimer();
   S.perfIndex--;
+  S.transposeOffset=0;
+  refreshPerfTransposeBar();
   loadPerfSong(false);
   syncPerfState(true);
 }
@@ -1251,27 +1267,56 @@ function exitPerf(){
   if(autoBtn)autoBtn.style.display='';
   var buyBtn=document.getElementById('perf-buy-btn');
   if(buyBtn)buyBtn.style.display='none';
-  S.inGuestPerf=false; S.guestPerfSongs=[]; S.guestPerfIndex=0;
+  S.inGuestPerf=false; S.guestPerfSongs=[]; S.guestPerfIndex=0; S.transposeOffset=0;
   // Si admin → signale fin de perf aux visiteurs
   if(S.mode==='admin')syncPerfState(false);
+}
+
+// -- TRANSPOSITION EN MODE PERFORMANCE (admin only) --
+function refreshPerfTransposeBar(){
+  var bar=document.getElementById('perf-transpose-bar');
+  if(!bar)return;
+  if(S.mode!=='admin'){bar.style.display='none';return;}
+  bar.style.display='flex';
+  var off=S.transposeOffset;
+  var lbl=document.getElementById('perf-transpose-lbl');
+  var noteEl=document.getElementById('perf-transpose-note');
+  if(lbl){
+    var txt=(off===0)?'0 ♩':(off>0?'+'+off:String(off))+' ♩';
+    lbl.textContent=txt;
+    lbl.style.color=off===0?'#e8f4f8':off>0?'#FF8C00':'#64B5FF';
+  }
+  if(noteEl){
+    var roots=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    var newIdx=((0+off)%12+12)%12;
+    noteEl.textContent=off!==0?('→ '+roots[newIdx]):'';
+  }
+}
+function perfTranspose(delta){
+  if(S.mode!=='admin')return;
+  S.transposeOffset=S.transposeOffset+delta;
+  refreshPerfTransposeBar();
+  loadPerfSong(false);
+  syncPerfState(true);
+}
+function perfTransposeReset(){
+  if(S.mode!=='admin')return;
+  S.transposeOffset=0;
+  refreshPerfTransposeBar();
+  loadPerfSong(false);
+  syncPerfState(true);
 }
 
 // -- SYNC ÉTAT PERFORMANCE VERS VISITEURS --
 function syncPerfState(active){
   if(!_fbAuth.currentUser)return;
-  // Songs filtrées de la setlist active (pas toute la bibliothèque)
-  var setlistSongs=S.setlist.map(function(id){
-    return S.songs.find(function(sg){return sg.id===id;});
-  }).filter(Boolean);
   var perfData={
     perfActive:active,
     perfIndex:active?S.perfIndex:0,
+    perfTranspose:active?S.transposeOffset:0,
     perfChangedAt:Date.now(),
     sessionStartTime:S.sessionStartTime||0,
-    freeHours:S.freeHours||2,
-    // Envoyer les songs de la session active → visiteurs voient la bonne playlist
-    currentSongs:setlistSongs,
-    currentSetlist:S.setlist
+    freeHours:S.freeHours||2
   };
   _fbDoc.update(perfData).catch(function(){
     _fbDoc.set(Object.assign({
@@ -1279,23 +1324,33 @@ function syncPerfState(active){
       sessions:S.sessions,activeSession:S.activeSession
     },perfData)).catch(function(){});
   });
-  // Sync rooms aussi
+  // Sync rooms → inclut songs+setlist de la session active pour les visiteurs
   if(S.roomCode){
-    _fbDB.collection('rooms').doc(S.roomCode).update({
+    // Construire la liste des chansons de la setlist active
+    var setlistSongs=S.setlist.map(function(id){
+      return S.songs.find(function(sg){return sg.id===id;});
+    }).filter(Boolean);
+    _fbDB.collection('rooms').doc(S.roomCode).update(Object.assign({
       perfActive:active,
       perfIndex:active?S.perfIndex:0,
+      perfTranspose:active?S.transposeOffset:0,
       sessionStartTime:S.sessionStartTime||0,
       freeHours:S.freeHours||2,
-      songs:setlistSongs,
-      setlist:S.setlist
-    }).catch(function(){
+      songs:setlistSongs,        // chansons de la session active
+      setlist:S.setlist          // ordre setlist
+    },{})).catch(function(){
+      // Si le doc n'existe pas encore, le créer
       saveRoomToFirestore(S.roomCode).catch(function(){});
     });
   }
 }
 
 // -- VISITEUR : RÉCEPTION CHANGEMENT CHANSON ADMIN --
-function handleGuestPerfSync(perfIndex, sessionStartTime, freeHours){
+function handleGuestPerfSync(perfIndex, sessionStartTime, freeHours, perfTranspose){
+  // Appliquer la transposition admin
+  var newTranspose=typeof perfTranspose==='number'?perfTranspose:0;
+  var transposeChanged=(S.transposeOffset!==newTranspose);
+  S.transposeOffset=newTranspose;
   // Mettre à jour le timer de session → débloque les chansons
   if(sessionStartTime&&sessionStartTime>0){
     if(S.guestSession){
@@ -1324,7 +1379,7 @@ function handleGuestPerfSync(perfIndex, sessionStartTime, freeHours){
     loadPerfSong(true);
     showToast('🎸 Performance lancée — accès débloqué !');
   } else {
-    // Changer de chanson si l'index a changé
+    // Changer de chanson si l'index a changé, ou recharger si transposition a changé
     if(S.guestPerfIndex!==perfIndex){
       if(PF.countTimer){clearTimeout(PF.countTimer);PF.countTimer=null;}
       var ov2=document.getElementById('perf-overlay');
@@ -1333,6 +1388,11 @@ function handleGuestPerfSync(perfIndex, sessionStartTime, freeHours){
       S.guestPerfIndex=perfIndex;
       loadPerfSong(true);
       showToast('🎵 Chanson '+(perfIndex+1));
+    } else if(transposeChanged){
+      // Même chanson mais la tonalité a changé → recharger l'affichage
+      loadPerfSong(false);
+      var transMsg=newTranspose===0?'♩ Tonalité originale':(newTranspose>0?'♩ +'+newTranspose+' demi-tons':'♩ '+newTranspose+' demi-tons');
+      showToast(transMsg);
     }
   }
 }
@@ -2047,27 +2107,8 @@ setInterval(function(){
       adminTimer.textContent=(h2>0?h2+'h ':'')+('0'+m2).slice(-2)+'m '+('0'+s2).slice(-2)+'s';
     } else if(S.view==='room'){render();}
   }
-  // Rafraichir le timer acces gratuit session visiteur
-  if(S.mode!=='admin'&&S.guestSession){
-    var gs3=S.guestSession;
-    var fMs3=(gs3.freeHours||2)*3600000;
-    var gsStart3=gs3.sessionStartTime||gs3._sessionStart||0;
-    var gEl=document.getElementById('guest-timer-display');
-    if(gsStart3>0){
-      var tL3=Math.max(0,fMs3-(now-gsStart3));
-      if(tL3===0){
-        // Timer expiré → effacer localStorage et verrouiller
-        localStorage.removeItem('rth-guest-session');
-        localStorage.removeItem('rth-session-start');
-        if(S.view==='guest')render(); // afficher l'écran expiré
-      } else if(gEl){
-        var h3=Math.floor(tL3/3600000);
-        var m3=Math.floor((tL3%3600000)/60000);
-        var s3=Math.floor((tL3%60000)/1000);
-        gEl.textContent=(h3>0?h3+'h ':'')+('0'+m3).slice(-2)+'m '+('0'+s3).slice(-2)+'s';
-      }
-    }
-  }
+  // Rafraichir le timer acces gratuit session visiteur — timer masqué côté visiteur
+  // (l'expiration est gérée par Firestore sessionStartTime)
 },1000); // toutes les secondes pour le timer
 
 // ==========================================
@@ -2628,6 +2669,13 @@ function renderPlay(){
         +'<div style="font-size:10px;color:rgba(200,230,220,0.35);margin-top:4px;margin-bottom:6px;line-height:1.7">'
           +'Format : <span style="color:#64FFDA;font-family:monospace">[G]mot [Am]mot</span> — colle l\'accord juste avant le mot.<br/>'
           +'Ligne vide = séparation de couplet. Paroles sans accords = pas de crochets.'
+        +'</div>'
+        +'<div id="edit-transpose-bar" style="display:flex;align-items:center;gap:7px;margin-bottom:9px;padding:9px 12px;background:rgba(0,0,0,0.3);border-radius:12px;border:1px solid rgba(100,255,218,0.1)">'
+          +'<span style="font-size:9px;font-weight:900;letter-spacing:1.5px;color:rgba(200,230,220,0.35);flex-shrink:0">♩ TONALITÉ</span>'
+          +'<button onclick="editTranspose(-1)" style="width:32px;height:32px;border-radius:50%;border:1px solid rgba(100,181,255,0.4);background:rgba(100,181,255,0.1);color:#64B5FF;font-size:16px;font-weight:900;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center">▼</button>'
+          +'<div id="edit-transpose-lbl" style="flex:1;text-align:center;font-size:13px;font-weight:900;color:'+(S.editTotalTranspose===0?'rgba(200,230,220,0.45)':(S.editTotalTranspose>0?'#FF8C00':'#64B5FF'))+'">'+(S.editTotalTranspose===0?'Original':(S.editTotalTranspose>0?'↑ +'+S.editTotalTranspose:'↓ '+S.editTotalTranspose))+' demi-tons</div>'
+          +'<button onclick="editTranspose(1)" style="width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,140,0,0.4);background:rgba(255,140,0,0.1);color:#FF8C00;font-size:16px;font-weight:900;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center">▲</button>'
+          +'<button onclick="editTransposeReset()" style="padding:5px 10px;border-radius:9px;border:1px solid rgba(255,100,100,0.3);background:rgba(255,100,100,0.07);color:#FF6B6B;font-size:11px;font-weight:800;cursor:pointer;flex-shrink:0'+(S.editTotalTranspose===0?';opacity:0.4;pointer-events:none':'')+'" title="Remettre la tonalité originale">↺ Reset</button>'
         +'</div>'
         +'<textarea class="input-field" id="edit-lyrics" rows="14" style="resize:vertical;font-family:monospace;font-size:13px;line-height:1.9" oninput="S.editText=this.value">'+esc(S.editText)+'</textarea>'
       +'</div>'
@@ -3392,6 +3440,39 @@ function cycleLyricsMode(){
 }
 
 // -- ÉDITION MANUELLE --
+// -- TRANSPOSITION EN MODE ÉDITION --
+function editTranspose(delta){
+  // Lire le contenu actuel du textarea (au cas où modifié à la main)
+  var ta=document.getElementById('edit-lyrics');
+  if(ta)S.editText=ta.value;
+  var hasChords=/\[[^\]]+\]/.test(S.editText);
+  if(!hasChords)return showToast('⚠️ Pas d\'accords à transposer — format [G]mot');
+  S.editText=transposeLyrics(S.editText,delta);
+  S.editTotalTranspose=S.editTotalTranspose+delta;
+  // Mettre à jour le textarea sans re-render complet
+  if(ta)ta.value=S.editText;
+  // Mettre à jour le label
+  var lbl=document.getElementById('edit-transpose-lbl');
+  if(lbl){
+    var t=S.editTotalTranspose;
+    lbl.textContent=(t===0?'Original':(t>0?'↑ +'+t:'↓ '+t))+' demi-tons';
+    lbl.style.color=t===0?'rgba(200,230,220,0.45)':(t>0?'#FF8C00':'#64B5FF');
+  }
+  var resetBtn=document.querySelector('#edit-transpose-bar button[onclick="editTransposeReset()"]');
+  if(resetBtn){
+    resetBtn.style.opacity=S.editTotalTranspose===0?'0.4':'1';
+    resetBtn.style.pointerEvents=S.editTotalTranspose===0?'none':'auto';
+  }
+  var msg=delta>0?'▲ +1 demi-ton':'▼ -1 demi-ton';
+  showToast(msg);
+}
+function editTransposeReset(){
+  if(S.editTotalTranspose===0)return;
+  // Annuler tous les demi-tons appliqués
+  editTranspose(-S.editTotalTranspose);
+  showToast('♩ Tonalité originale restaurée');
+}
+
 function openEdit(){
   if(!S.selected)return;
   var s=S.selected;
@@ -3399,6 +3480,7 @@ function openEdit(){
   S.editArtist=s.artist||'';
   S.editBpm=String(s.bpm||80);
   S.editText=s.chordLyrics||'';
+  S.editTotalTranspose=0;
   S.editMode=true;
   render();
   // Focus textarea after render
