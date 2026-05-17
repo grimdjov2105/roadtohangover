@@ -486,7 +486,7 @@ var S={
   editMode:false,editTitle:'',editArtist:'',editBpm:'',editText:'',editTotalTranspose:0,
   ukeTab:'Majeur', searchQ:'', sortMode:'default',
   transposeOffset:0,
-  guestSession:null,
+  guestSession:null, guestVerifying:false,
   shortCode:'',
   shortLink:'',
   sessionStartTime:0,
@@ -529,37 +529,48 @@ try{
   S.sessionStartTime=parseInt(localStorage.getItem('rth-session-start-admin')||'0')||0;
   S.adminPwdSet=true; // Firebase gère l'auth
   try{var _pr=localStorage.getItem(PROFK);S.visitorProfile=_pr?JSON.parse(_pr):null;}catch(e){}
-  // Restaurer la session visiteur après refresh (si pas expirée)
+  // Restaurer la session visiteur après refresh — toujours vérifier Firestore d'abord
   try{
     var _gs=localStorage.getItem('rth-guest-session');
     if(_gs){
       var _gsParsed=JSON.parse(_gs);
-      var _gsFreeMs=(_gsParsed.freeHours||3)*3600000;
-      var _gsStart=_gsParsed.sessionStartTime||_gsParsed._sessionStart||0;
-      var _gsExpired=_gsStart>0&&(Date.now()-_gsStart)>_gsFreeMs;
-      if(!_gsExpired&&_gsParsed.code){
+      if(_gsParsed.code){
+        // Restaurer en mode "vérification en cours" — NE PAS montrer le contenu gratuit avant confirmation
         S.guestSession=_gsParsed;
+        S.guestVerifying=true; // bloque renderGuest() jusqu'à confirmation Firestore
         S.view='guest';
-        // Valider immédiatement contre Firestore — évite d'afficher le timer si la session
-        // a été terminée par l'admin pendant que le visiteur était hors ligne
+        var _gsStart=_gsParsed.sessionStartTime||_gsParsed._sessionStart||0;
+        // Vérifier Firestore AVANT d'autoriser l'accès
         _fbDoc.get().then(function(doc){
-          if(!doc.exists||S.mode==='admin')return;
+          S.guestVerifying=false;
+          if(!doc.exists||S.mode==='admin'){render();return;}
           var d=doc.data();
-          if(typeof d.sessionStartTime==='number'&&S.guestSession){
-            var fsStart=d.sessionStartTime;
-            var fsFreeHours=d.freeHours||S.guestSession.freeHours||3;
-            var fsFreeMs=fsFreeHours*3600000;
-            // Mettre à jour avec les vraies valeurs Firestore
+          var fsStart=typeof d.sessionStartTime==='number'?d.sessionStartTime:_gsStart;
+          var fsFreeHours=d.freeHours||_gsParsed.freeHours||3;
+          var fsFreeMs=fsFreeHours*3600000;
+          // Écraser localStorage avec les vraies valeurs Firestore
+          if(S.guestSession){
             S.guestSession.sessionStartTime=fsStart;
             S.guestSession.freeHours=fsFreeHours;
             try{localStorage.setItem('rth-guest-session',JSON.stringify(S.guestSession));}catch(e){}
-            // Si expiré selon Firestore → re-render pour afficher le bandeau
-            var fsExpired=fsStart===0||(Date.now()-fsStart)>fsFreeMs;
-            if(fsExpired||fsStart!==_gsStart){
-              if(S.view==='guest')render();
-            }
           }
-        }).catch(function(){});
+          // Si expiré selon Firestore → supprimer du localStorage
+          var fsExpired=fsStart===0||(Date.now()-fsStart)>fsFreeMs;
+          if(fsExpired){
+            // Garder guestSession pour afficher le bandeau "session terminée" + bouton don
+            // mais effacer l'accès gratuit du localStorage
+            try{
+              var saved=JSON.parse(localStorage.getItem('rth-guest-session')||'{}');
+              saved.sessionStartTime=fsStart; // valeur expirée de Firestore
+              localStorage.setItem('rth-guest-session',JSON.stringify(saved));
+            }catch(e){}
+          }
+          if(S.view==='guest')render();
+        }).catch(function(){
+          // Réseau indisponible → utiliser la valeur locale (mieux que rien)
+          S.guestVerifying=false;
+          if(S.view==='guest')render();
+        });
       } else {
         localStorage.removeItem('rth-guest-session');
       }
@@ -725,7 +736,7 @@ startFirestoreSync();
     decoded._sessionStart=savedStart||Date.now();
     if(!savedStart)try{localStorage.setItem('rth-session-start',String(decoded._sessionStart));}catch(e){}
     S.guestSession=decoded;
-    // Sauvegarder en localStorage pour persister après refresh
+    S.guestVerifying=false; // Jointure fraîche depuis Firestore = déjà vérifiée
     try{localStorage.setItem('rth-guest-session',JSON.stringify(decoded));}catch(e){}
     S.view='guest';
     render();
@@ -1659,6 +1670,15 @@ function showPayModal(){showDonModal();}
 function renderGuest(){
   var gs=S.guestSession;
   if(!gs)return'<div style="text-align:center;padding:40px">Aucune session</div>';
+
+  // Vérification Firestore en cours → spinner, pas de contenu gratuit affiché
+  if(S.guestVerifying){
+    return '<div style="text-align:center;padding:60px 20px">'
+      +'<div style="font-size:40px;margin-bottom:16px;animation:spin 1.2s linear infinite">🌺</div>'
+      +'<div style="font-size:14px;font-weight:700;color:#64FFDA;margin-bottom:6px">Vérification de la session...</div>'
+      +'<div style="font-size:11px;color:rgba(200,230,220,0.35)">Connexion à Firestore</div>'
+    +'</div>';
+  }
   var songs=gs.songs||[];
   var freeMs=(gs.freeHours||3)*3600*1000;
   var sessionStart=gs.sessionStartTime||gs._sessionStart||0;
