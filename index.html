@@ -490,7 +490,7 @@ var S={
   shortCode:'',
   shortLink:'',
   sessionStartTime:0,
-  adminName:'',pricePerSong:100,payInfo:'',freeHours:2,
+  adminName:'',pricePerSong:100,payInfo:'',freeHours:3,
   unlockedSongs:[],
   payTarget:null,
   paypalClientId:'',revolutHandle:'',deblockPhone:'',
@@ -516,7 +516,7 @@ try{
   var _sl=localStorage.getItem(SLK); S.setlist=_sl?JSON.parse(_sl):[];
   S.adminName=localStorage.getItem(AK)||'';
   S.pricePerSong=parseInt(localStorage.getItem(PK)||'100')||100;
-  S.freeHours=parseInt(localStorage.getItem('rth-free-hours')||'2')||2;
+  S.freeHours=parseInt(localStorage.getItem('rth-free-hours')||'3')||3;
   S.payInfo=localStorage.getItem(PIK)||'';
   var _ul=localStorage.getItem(ULK); S.unlockedSongs=_ul?JSON.parse(_ul):[];
   S.paypalClientId=localStorage.getItem(PPID)||'';
@@ -533,7 +533,7 @@ try{
     var _gs=localStorage.getItem('rth-guest-session');
     if(_gs){
       var _gsParsed=JSON.parse(_gs);
-      var _gsFreeMs=(_gsParsed.freeHours||2)*3600000;
+      var _gsFreeMs=(_gsParsed.freeHours||3)*3600000;
       var _gsStart=_gsParsed.sessionStartTime||_gsParsed._sessionStart||0;
       var _gsExpired=_gsStart>0&&(Date.now()-_gsStart)>_gsFreeMs;
       if(!_gsExpired&&_gsParsed.code){
@@ -546,7 +546,7 @@ try{
           var d=doc.data();
           if(typeof d.sessionStartTime==='number'&&S.guestSession){
             var fsStart=d.sessionStartTime;
-            var fsFreeHours=d.freeHours||S.guestSession.freeHours||2;
+            var fsFreeHours=d.freeHours||S.guestSession.freeHours||3;
             var fsFreeMs=fsFreeHours*3600000;
             // Mettre à jour avec les vraies valeurs Firestore
             S.guestSession.sessionStartTime=fsStart;
@@ -584,7 +584,7 @@ _fbAuth.onAuthStateChanged(function(user){
       startFirestoreSync();
       // Si timer encore actif → afficher directement la vue room
       var now=Date.now();
-      var freeMs=(S.freeHours||2)*3600000;
+      var freeMs=(S.freeHours||3)*3600000;
       var timerActif=S.sessionStartTime>0&&(now-S.sessionStartTime)<freeMs;
       if(timerActif) S.view='room';
       render();
@@ -753,7 +753,7 @@ function save(){
       sessions:S.sessions,
       activeSession:S.activeSession,
       sessionStartTime:S.sessionStartTime||0,
-      freeHours:S.freeHours||2,
+      freeHours:S.freeHours||3,
       updatedAt:firebase.firestore.FieldValue.serverTimestamp()
     }).catch(function(e){console.warn('Firestore save err:',e);});
   }
@@ -771,7 +771,7 @@ function saveSL(){
       sessions:S.sessions,
       activeSession:S.activeSession,
       sessionStartTime:S.sessionStartTime||0,
-      freeHours:S.freeHours||2,
+      freeHours:S.freeHours||3,
       updatedAt:firebase.firestore.FieldValue.serverTimestamp()
     }).catch(function(e){console.warn('Firestore saveSL err:',e);});
   }
@@ -1156,7 +1156,7 @@ function loadPerfSong(autoStart){
   if(buyBtn){
     if(S.inGuestPerf){
       var gs2=S.guestSession||{};
-      var freeMs2=(gs2.freeHours||2)*3600*1000;
+      var freeMs2=(gs2.freeHours||3)*3600*1000;
       var sessionStart2=gs2.sessionStartTime||gs2._sessionStart||Date.now();
       var freeExpired2=(Date.now()-sessionStart2)>freeMs2;
       buyBtn.style.display=freeExpired2?'inline-block':'none';
@@ -1212,13 +1212,13 @@ function startPerf(){
   if(S.setlist.length===0)return showToast('Ajoute au moins une chanson à la setlist !');
   // 1. Lancer le timer si pas déjà actif
   var now=Date.now();
-  var freeMs=(S.freeHours||2)*3600*1000;
+  var freeMs=(S.freeHours||3)*3600*1000;
   var alreadyRunning=S.sessionStartTime>0&&(now-S.sessionStartTime)<freeMs;
   if(!alreadyRunning){
     S.sessionStartTime=now;
     try{
       localStorage.setItem('rth-session-start-admin',String(S.sessionStartTime));
-      localStorage.setItem('rth-free-hours',String(S.freeHours||2));
+      localStorage.setItem('rth-free-hours',String(S.freeHours||3));
     }catch(e){}
   }
   // 2. Ouvrir la performance admin directement
@@ -1231,7 +1231,7 @@ function startPerf(){
   loadPerfSong(true);
   // 3. Sync Firestore → visiteurs : timer + performance + chansons débloquées
   syncPerfState(true);
-  showToast('🎤 Performance lancée — '+S.setlist.length+' chansons · '+(S.freeHours||2)+'H chrono !');
+  showToast('🎤 Performance lancée — '+S.setlist.length+' chansons · '+(S.freeHours||3)+'H chrono !');
 }
 function perfNext(){
   if(S.inGuestPerf){
@@ -1358,7 +1358,7 @@ function syncPerfState(active){
     perfTranspose:active?S.transposeOffset:0,
     perfChangedAt:Date.now(),
     sessionStartTime:S.sessionStartTime||0,
-    freeHours:S.freeHours||2,
+    freeHours:S.freeHours||3,
     perfSongs:active?setlistSongs:[]  // songs dans l'ordre setlist pour sync visiteur
   };
   _fbDoc.update(perfData).catch(function(){
@@ -1374,7 +1374,7 @@ function syncPerfState(active){
       perfIndex:active?S.perfIndex:0,
       perfTranspose:active?S.transposeOffset:0,
       sessionStartTime:S.sessionStartTime||0,
-      freeHours:S.freeHours||2,
+      freeHours:S.freeHours||3,
       songs:setlistSongs,        // chansons de la session active (ordre setlist)
       setlist:S.setlist          // ordre setlist
     },{})).catch(function(){
@@ -1393,7 +1393,7 @@ function handleGuestPerfSync(perfIndex, sessionStartTime, freeHours, perfTranspo
   if(sessionStartTime&&sessionStartTime>0){
     if(S.guestSession){
       S.guestSession.sessionStartTime=sessionStartTime;
-      S.guestSession.freeHours=freeHours||2;
+      S.guestSession.freeHours=freeHours||3;
     }
   }
   // Ouvrir la performance si pas encore ouverte
@@ -1469,7 +1469,7 @@ function buildSessionData(withLyrics){
   if(ssl.length===0)return null;
   return {
     code:S.roomCode||'??????',admin:S.adminName||'Admin',
-    freeHours:S.freeHours||2,
+    freeHours:S.freeHours||3,
     sessionStartTime:S.sessionStartTime||0,
     paypalClientId:S.paypalClientId||'',
     deblockPhone:S.deblockPhone||'',adminWhatsApp:S.adminWhatsApp||'',
@@ -1653,7 +1653,7 @@ function renderGuest(){
   var gs=S.guestSession;
   if(!gs)return'<div style="text-align:center;padding:40px">Aucune session</div>';
   var songs=gs.songs||[];
-  var freeMs=(gs.freeHours||2)*3600*1000;
+  var freeMs=(gs.freeHours||3)*3600*1000;
   var sessionStart=gs.sessionStartTime||gs._sessionStart||0;
   // Si sessionStart=0 → session pas encore démarrée par l'admin → chansons verrouillées
   var sessionNotStarted=(sessionStart===0);
@@ -1673,7 +1673,6 @@ function renderGuest(){
         +'<div class="song-thumb" style="background:linear-gradient(135deg,'+cc(sg.key||'G')+',rgba(0,0,0,0.4));width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;color:#fff;flex-shrink:0">'+esc(sg.key||'?')+'</div>'
         +'<div style="flex:1;min-width:0">'
           +'<div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(sg.title)+'</div>'
-          +'<div style="font-size:11px;color:rgba(200,230,220,0.4)">'+esc(sg.artist)+'</div>'
         +'</div>'
         +'<span style="padding:5px 10px;border-radius:20px;background:rgba(100,255,218,0.05);border:1px solid rgba(100,255,218,0.15);color:rgba(100,255,218,0.3);font-size:11px;font-weight:700">'+(locked?'🔒':'▶')+'</span>'
       +'</div>'
@@ -1691,7 +1690,7 @@ function renderGuest(){
       :'<div style="background:linear-gradient(135deg,rgba(100,255,218,0.06),rgba(255,215,0,0.06));border:2px solid rgba(100,255,218,0.2);border-radius:16px;padding:18px 16px;margin-bottom:14px;text-align:center">'
         +'<div style="font-size:32px;margin-bottom:8px">🙏</div>'
         +'<div style="font-size:15px;font-weight:900;color:#FFD700;margin-bottom:6px">Session terminée — Merci d\'avoir été là !</div>'
-        +'<div style="font-size:12px;color:rgba(200,230,220,0.5);margin-bottom:14px;line-height:1.7">Tu as aimé la musique ?<br/>Un petit don fait plaisir à l\'artiste 💙</div>'
+        +'<div style="font-size:12px;color:rgba(200,230,220,0.5);margin-bottom:14px">ça fait toujours plaisir 💙</div>'
         +'<button onclick="showDonModal()" style="width:100%;padding:13px;border-radius:13px;border:none;background:linear-gradient(135deg,#FFD700,#FF8C00);color:#0a1628;font-weight:900;font-size:14px;cursor:pointer;letter-spacing:1px">💙 Faire un don</button>'
       +'</div>'
     )
@@ -2181,7 +2180,7 @@ setInterval(function(){
   // Rafraichir le timer admin dans renderRoom
   var adminTimer=document.getElementById('admin-free-timer');
   if(adminTimer&&S.sessionStartTime){
-    var fMs2=(S.freeHours||2)*3600000;
+    var fMs2=(S.freeHours||3)*3600000;
     var tL2=Math.max(0,fMs2-(now-S.sessionStartTime));
     if(tL2>0){
       var h2=Math.floor(tL2/3600000);
@@ -2192,7 +2191,7 @@ setInterval(function(){
   }
   // Rafraichir le timer acces gratuit session visiteur
   if(S.mode!=='admin'&&S.guestSession&&S.view==='guest'){
-    var gsFreeMs=(S.guestSession.freeHours||2)*3600000;
+    var gsFreeMs=(S.guestSession.freeHours||3)*3600000;
     var gsStart=S.guestSession.sessionStartTime||S.guestSession._sessionStart||0;
     if(gsStart>0){
       var gsTimeLeft=Math.max(0,gsFreeMs-(now-gsStart));
@@ -2986,7 +2985,7 @@ function renderRoom(){
     :'';
   var timerAdminHtml=(function(){
     var now=Date.now();
-    var freeMs=(S.freeHours||2)*3600000;
+    var freeMs=(S.freeHours||3)*3600000;
     var active=S.sessionStartTime>0;
     var expired=active&&(now-S.sessionStartTime)>=freeMs;
     var running=active&&!expired;
@@ -3035,17 +3034,9 @@ function renderRoom(){
       +'<button onclick="copySessionLink()" style="width:100%;padding:10px;border-radius:10px;border:1px solid rgba(100,255,218,0.2);background:rgba(100,255,218,0.06);color:#64FFDA;font-weight:700;font-size:12px;cursor:pointer;margin-bottom:4px">📋 Copier le lien</button>'
     :'<button class="btn-primary btn-teal" onclick="createRoom()">🌊 Créer une Session</button>';
   var perfBtn=ssl.length>0
-    ?'<div style="background:rgba(100,255,218,0.03);border:1px solid rgba(100,255,218,0.1);border-radius:16px;padding:14px 16px;margin-bottom:14px">'
-      +'<div style="font-size:10px;font-weight:900;letter-spacing:1px;color:#64FFDA;margin-bottom:10px">⏱ DURÉE GRATUITE</div>'
-      +'<div style="display:flex;gap:8px">'
-        +[1,2,3,4].map(function(h){
-          var active=S.freeHours===h;
-          var col=h===4?'#FF4081':h===2?'#FF8C00':'#64FFDA';
-          return '<button onclick="setFreeHours('+h+')" '
-            +'style="flex:1;padding:12px 4px;border-radius:11px;border:1.5px solid '+(active?col:'rgba(255,255,255,0.07)')+';background:'+(active?'rgba(255,255,255,0.07)':'transparent')+';color:'+(active?col:'rgba(200,230,220,0.3)')+';font-weight:900;font-size:15px;cursor:pointer">'+h+'H</button>';
-        }).join('')
-      +'</div>'
-      +'<div style="font-size:10px;color:rgba(200,230,220,0.25);margin-top:8px;text-align:center">Appuie sur 🎤 Lancer d\'une session pour démarrer le compteur</div>'
+    ?'<div style="background:rgba(100,255,218,0.03);border:1px solid rgba(100,255,218,0.1);border-radius:16px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">'
+      +'<div style="font-size:10px;font-weight:900;letter-spacing:1px;color:#64FFDA">⏱ DURÉE SESSION</div>'
+      +'<div style="font-size:20px;font-weight:900;color:#64FFDA">3H</div>'
     +'</div>'
     :'';
 
@@ -3099,10 +3090,13 @@ function renderRoom(){
         +'</div>'
         +'<div style="display:flex;gap:6px;flex-shrink:0">'
           +(cnt>0&&!isDisplayed?'<button onclick="displaySession('+si+')" style="padding:7px 10px;border-radius:9px;border:1px solid rgba(255,140,0,0.3);background:rgba(255,140,0,0.07);color:#FF8C00;font-size:11px;font-weight:700;cursor:pointer">📺</button>':'')
-          +'<button onclick="showSessionPreview('+si+')" style="padding:7px 12px;border-radius:9px;border:1px solid rgba(100,255,218,0.18);background:transparent;color:rgba(100,255,218,0.6);font-size:12px;font-weight:700;cursor:pointer">👁 Voir</button>'
+          +'<button onclick="showSessionPreview('+si+')" style="padding:7px 12px;border-radius:9px;border:1px solid rgba(100,255,218,0.18);background:transparent;color:rgba(100,255,218,0.6);font-size:12px;font-weight:700;cursor:pointer">👁</button>'
+          +(isActive&&S.sessionStartTime>0&&(Date.now()-S.sessionStartTime)<(S.freeHours||3)*3600000
+            ?'<button onclick="stopAdminTimer()" style="padding:7px 10px;border-radius:9px;border:1px solid rgba(255,100,100,0.35);background:rgba(255,100,100,0.1);color:#FF6B6B;font-size:11px;font-weight:900;cursor:pointer" title="Terminer la session maintenant">⏹</button>'
+            :'')
           +(cnt>0
-            ?'<button onclick="launchSession('+si+')" style="padding:7px 12px;border-radius:9px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-size:12px;font-weight:900;cursor:pointer;box-shadow:0 3px 10px rgba(255,140,0,0.2)">🎤 Lancer</button>'
-            :'<button disabled style="padding:7px 12px;border-radius:9px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:rgba(200,230,220,0.2);font-size:12px;font-weight:700;cursor:default">🎤 Lancer</button>')
+            ?'<button onclick="launchSession('+si+')" style="padding:7px 12px;border-radius:9px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-size:12px;font-weight:900;cursor:pointer;box-shadow:0 3px 10px rgba(255,140,0,0.2)">🎤</button>'
+            :'<button disabled style="padding:7px 12px;border-radius:9px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:rgba(200,230,220,0.2);font-size:12px;font-weight:700;cursor:default">🎤</button>')
         +'</div>'
       +'</div>';
     }
@@ -3164,13 +3158,11 @@ function renderSettings(){
         +'<div style="flex:1"><label class="input-label">TON NOM</label><input class="input-field" id="set-admin" value="'+esc(S.adminName)+'" placeholder="Ex: Michel" oninput="S.adminName=this.value"/></div>'
         +'<div style="width:110px"><label class="input-label">PRIX (CFP)</label><input class="input-field" type="number" id="set-price" value="'+S.pricePerSong+'" placeholder="100" oninput="S.pricePerSong=parseInt(this.value)||100"/></div>'
       +'</div>'
-      +'<div style="margin-bottom:12px"><label class="input-label">&#9200; ACCES GRATUIT AVANT PAIEMENT</label>'
-        +'<div style="display:flex;gap:6px;margin-top:6px">'
-          +'<button onclick="setFreeHours(1)" style="flex:1;padding:10px;border-radius:10px;border:2px solid '+(S.freeHours===1?'#64FFDA':'rgba(100,255,218,0.2)')+';background:'+(S.freeHours===1?'rgba(100,255,218,0.15)':'rgba(100,255,218,0.04)')+';color:'+(S.freeHours===1?'#64FFDA':'rgba(200,230,220,0.4)')+';font-weight:900;font-size:13px;cursor:pointer">1H</button>'
-          +'<button onclick="setFreeHours(2)" style="flex:1;padding:10px;border-radius:10px;border:2px solid '+(S.freeHours===2?'#64FFDA':'rgba(100,255,218,0.2)')+';background:'+(S.freeHours===2?'rgba(100,255,218,0.15)':'rgba(100,255,218,0.04)')+';color:'+(S.freeHours===2?'#64FFDA':'rgba(200,230,220,0.4)')+';font-weight:900;font-size:13px;cursor:pointer">2H</button>'
-          +'<button onclick="setFreeHours(3)" style="flex:1;padding:10px;border-radius:10px;border:2px solid '+(S.freeHours===3?'#64FFDA':'rgba(100,255,218,0.2)')+';background:'+(S.freeHours===3?'rgba(100,255,218,0.15)':'rgba(100,255,218,0.04)')+';color:'+(S.freeHours===3?'#64FFDA':'rgba(200,230,220,0.4)')+';font-weight:900;font-size:13px;cursor:pointer">3H</button>'
+      +'<div style="margin-bottom:12px"><label class="input-label">⏱ DURÉE DE SESSION</label>'
+        +'<div style="display:flex;align-items:center;gap:10px;margin-top:8px;padding:10px 14px;background:rgba(100,255,218,0.05);border:1px solid rgba(100,255,218,0.15);border-radius:10px">'
+          +'<div style="font-size:24px;font-weight:900;color:#64FFDA">3H</div>'
+          +'<div style="font-size:11px;color:rgba(200,230,220,0.4);line-height:1.6">Durée fixe — les visiteurs ont accès gratuitement pendant 3 heures après le lancement.</div>'
         +'</div>'
-        +'<div style="font-size:10px;color:rgba(200,230,220,0.3);margin-top:6px">Les visiteurs voient les paroles gratuitement pendant ce temps. Ensuite, paiement requis.</div>'
       +'</div>'
       +'<div style="display:flex;gap:8px;margin-bottom:12px"><div style=\"flex:1\"><label class=\"input-label\">TON NOM</label></div></div>'
       +'</div>'
@@ -3319,7 +3311,7 @@ function viewGuestSong(id){
   var gs=S.guestSession;
   if(!gs)return;
   // Vérifier timer pas expiré
-  var freeMs=(gs.freeHours||2)*3600000;
+  var freeMs=(gs.freeHours||3)*3600000;
   var sessionStart=gs.sessionStartTime||gs._sessionStart||Date.now();
   if(Date.now()-sessionStart>freeMs)return showToast('🔒 Session expirée');
   // Trouver la chanson dans la session
@@ -3509,7 +3501,7 @@ function displaySession(idx){
   });
 }
 function startAdminTimer(hours){
-  S.freeHours=hours||S.freeHours||2;
+  S.freeHours=hours||S.freeHours||3;
   S.sessionStartTime=Date.now();
   try{
     localStorage.setItem('rth-session-start-admin',String(S.sessionStartTime));
@@ -3526,7 +3518,7 @@ function startAdminTimer(hours){
 }
 function stopAdminTimer(){
   // Mettre sessionStartTime dans le passé lointain → session expirée immédiatement
-  var expiredTs=Date.now()-(S.freeHours||2)*3600000-1000;
+  var expiredTs=Date.now()-(S.freeHours||3)*3600000-1000;
   S.sessionStartTime=expiredTs;
   try{localStorage.setItem('rth-session-start-admin',String(S.sessionStartTime));}catch(e){}
   S.shortLink='';S.shortCode='';
@@ -3535,7 +3527,7 @@ function stopAdminTimer(){
     // Sync rth/data → onSnapshot visiteur reçoit et verrouille immédiatement
     var expiredData={
       sessionStartTime:expiredTs,
-      freeHours:S.freeHours||2,
+      freeHours:S.freeHours||3,
       updatedAt:firebase.firestore.FieldValue.serverTimestamp()
     };
     _fbDoc.update(expiredData).catch(function(){
@@ -3545,7 +3537,7 @@ function stopAdminTimer(){
     if(S.roomCode){
       _fbDB.collection('rooms').doc(S.roomCode).update({
         sessionStartTime:expiredTs,
-        freeHours:S.freeHours||2
+        freeHours:S.freeHours||3
       }).catch(function(){});
     }
   }
@@ -3922,7 +3914,7 @@ function exportFullBackup(){
     // -- Config admin --
     adminName:S.adminName||'',
     pricePerSong:S.pricePerSong||100,
-    freeHours:S.freeHours||2,
+    freeHours:S.freeHours||3,
     adminWhatsApp:S.adminWhatsApp||'',
     // -- Paiement --
     paypalClientId:S.paypalClientId||'',
