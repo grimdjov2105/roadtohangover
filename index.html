@@ -413,7 +413,7 @@ var EMAILS_REG_KEY = 'rth-emails-reg';
 var AK='rth-admin', PK='rth-price', PIK='rth-payinfo', ULK='rth-unlocked';
 var PPID='rth-ppid', REVK='rth-rev', DEBK='rth-deb', VID='rth-vid', EK='rth-oai-enc';
 var PROFK='rth-profile', WAPPK='rth-wapp', ADMK='rth-adm-hash', MODK='rth-mode';
-var MAX_SONGS=300, MAX_SETLIST=300;
+var MAX_SONGS=300, MAX_SETLIST=20;
 var SESK='rth-sessions';
 
 // -- ID VISITEUR — lié à l'empreinte de l'appareil (non transférable) --
@@ -628,17 +628,27 @@ function startFirestoreSync(){
       try{localStorage.setItem(SK,JSON.stringify(S.songs));}catch(e){}
       if(JSON.stringify(S.songs.map(function(s){return s.id;}))!==prevSongs)changed=true;
     }
-    if(data.setlist&&Array.isArray(data.setlist)){
-      S.setlist=data.setlist;
-      try{localStorage.setItem(SLK,JSON.stringify(S.setlist));}catch(e){}
-      if(JSON.stringify(S.setlist)!==prevSetlist)changed=true;
-    }
     if(data.sessions&&Array.isArray(data.sessions)){
       S.sessions=data.sessions;
       try{localStorage.setItem(SESK,JSON.stringify(S.sessions));}catch(e){}
     }
-    if(typeof data.activeSession==='number'&&data.activeSession!==S.activeSession){
-      S.activeSession=data.activeSession;changed=true;
+    if(typeof data.activeSession==='number'){
+      var _newAS=data.activeSession;
+      if(_newAS!==S.activeSession){S.activeSession=_newAS;changed=true;}
+      if(S.mode==='admin'){
+        var _sd=S.sessions[S.activeSession];
+        var _csl=_sd&&Array.isArray(_sd.setlist)?_sd.setlist:(data.setlist||[]);
+        if(JSON.stringify(_csl)!==prevSetlist){S.setlist=_csl.slice();changed=true;}
+        try{localStorage.setItem(SLK,JSON.stringify(S.setlist));}catch(e){}
+      } else if(data.setlist&&Array.isArray(data.setlist)){
+        S.setlist=data.setlist;
+        try{localStorage.setItem(SLK,JSON.stringify(S.setlist));}catch(e){}
+        if(JSON.stringify(S.setlist)!==prevSetlist)changed=true;
+      }
+    } else if(data.setlist&&Array.isArray(data.setlist)){
+      S.setlist=data.setlist;
+      try{localStorage.setItem(SLK,JSON.stringify(S.setlist));}catch(e){}
+      if(JSON.stringify(S.setlist)!==prevSetlist)changed=true;
     }
     if(typeof data.sessionStartTime==='number'){
       S.sessionStartTime=data.sessionStartTime;
@@ -792,11 +802,7 @@ function save(){
     }).catch(function(e){console.warn('Firestore save err:',e);});
   }
 }
-function saveSL(){
-  // Sync setlist dans la session active
-  S.sessions[S.activeSession]=S.sessions[S.activeSession]||{name:'Session '+(S.activeSession+1),setlist:[]};
-  S.sessions[S.activeSession].setlist=S.setlist.slice();
-  try{localStorage.setItem(SLK,JSON.stringify(S.setlist));}catch(e){}
+function saveSessions(){
   try{localStorage.setItem(SESK,JSON.stringify(S.sessions));}catch(e){}
   if(S.mode==='admin'&&_fbAuth.currentUser){
     _fbDoc.set({
@@ -807,8 +813,15 @@ function saveSL(){
       sessionStartTime:S.sessionStartTime||0,
       freeHours:S.freeHours||3,
       updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-    }).catch(function(e){console.warn('Firestore saveSL err:',e);});
+    }).catch(function(e){console.warn('Firestore saveSessions err:',e);});
   }
+}
+function saveSL(){
+  // Sync setlist dans la session active
+  S.sessions[S.activeSession]=S.sessions[S.activeSession]||{name:'Session '+(S.activeSession+1),setlist:[]};
+  S.sessions[S.activeSession].setlist=S.setlist.slice();
+  try{localStorage.setItem(SLK,JSON.stringify(S.setlist));}catch(e){}
+  saveSessions();
 }
 function cc(chord){return CC[chord.replace(/[^A-G]/g,'').charAt(0)]||'#64FFDA';}
 function fmt(s){if(!s||isNaN(s))return'0:00';return Math.floor(s/60)+':'+(String(Math.floor(s%60)).padStart(2,'0'));}
@@ -1713,16 +1726,16 @@ function renderGuest(){
   var tlS=Math.floor((timeLeft%60000)/1000);
   var timerStr=(tlH>0?tlH+'h ':'')+('0'+tlM).slice(-2)+'m '+('0'+tlS).slice(-2)+'s';
 
-  var cards=songs.map(function(sg,i){
-    var locked=freeExpired;
-    return '<div class="guest-song-card" '+(locked?'':' onclick="viewGuestSong(\''+sg.id+'\')" ')+' style="animation-delay:'+(i*0.05)+'s;opacity:'+(locked?'0.5':'1')+';cursor:'+(locked?'default':'pointer')+'">'
+  var displaySongs=freeExpired?[]:songs;
+  var cards=displaySongs.map(function(sg,i){
+    return '<div class="guest-song-card" onclick="viewGuestSong(\''+sg.id+'\')" style="animation-delay:'+(i*0.05)+'s;cursor:pointer">'
       +'<div style="display:flex;align-items:center;gap:10px">'
-        +'<div style="width:28px;height:28px;border-radius:50%;background:'+(locked?'rgba(255,100,100,0.15)':'rgba(100,255,218,0.15)')+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:'+(locked?'#FF6B6B':'#64FFDA')+';flex-shrink:0">'+(locked?'🔒':i+1)+'</div>'
+        +'<div style="width:28px;height:28px;border-radius:50%;background:rgba(100,255,218,0.15);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#64FFDA;flex-shrink:0">'+(i+1)+'</div>'
         +'<div class="song-thumb" style="background:linear-gradient(135deg,'+cc(sg.key||'G')+',rgba(0,0,0,0.4));width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;color:#fff;flex-shrink:0">'+esc(sg.key||'?')+'</div>'
         +'<div style="flex:1;min-width:0">'
           +'<div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(sg.title)+'</div>'
         +'</div>'
-        +'<span style="padding:5px 10px;border-radius:20px;background:rgba(100,255,218,0.05);border:1px solid rgba(100,255,218,0.15);color:rgba(100,255,218,0.3);font-size:11px;font-weight:700">'+(locked?'🔒':'▶')+'</span>'
+        +'<span style="padding:5px 10px;border-radius:20px;background:rgba(100,255,218,0.05);border:1px solid rgba(100,255,218,0.15);color:rgba(100,255,218,0.3);font-size:11px;font-weight:700">▶</span>'
       +'</div>'
     +'</div>';
   }).join('');
@@ -3251,10 +3264,10 @@ function renderSettings(){
     +'<div style="background:rgba(100,255,218,0.04);border:1px solid rgba(100,255,218,0.12);border-radius:16px;padding:18px;margin-bottom:16px"><div class="input-label" style="margin-bottom:12px">🔑 CLÉ OPENAI (WHISPER)</div>'+keyHtml+'</div>'
     +'<div style="background:rgba(255,140,0,0.05);border:1px solid rgba(255,140,0,0.12);border-radius:16px;padding:16px;margin-bottom:16px"><div class="input-label" style="color:#FF8C00;margin-bottom:10px">💡 COMMENT ÇA MARCHE</div><div style="font-size:12px;color:rgba(200,230,220,0.45);line-height:1.9">1. Import MP3 🎙 → Whisper transcrit<br/>2. Claude génère les accords<br/>3. Choisis le tempo 🐢▶⚡ par chanson<br/>4. Ajoute à la setlist 🎵<br/>5. Lancer la performance → Karaoké auto 🎤</div></div>'
     +'<div style="background:rgba(100,255,218,0.03);border:1px solid rgba(100,255,218,0.08);border-radius:16px;padding:16px"><div class="input-label" style="margin-bottom:10px">📱 INSTALLER L\'APP</div><div style="font-size:12px;color:rgba(200,230,220,0.45);line-height:1.9"><strong style="color:#e8f4f8">iPhone :</strong> Safari → Partager → "Sur l\'écran d\'accueil"<br/><strong style="color:#e8f4f8">Android :</strong> Chrome → ⋮ → "Ajouter à l\'écran d\'accueil"</div></div>'
-    +'<div style="margin-top:14px;padding:14px;border-top:1px solid rgba(255,255,255,0.07);text-align:center">'
+    +(S.mode==='admin'?('<div style="margin-top:14px;padding:14px;border-top:1px solid rgba(255,255,255,0.07);text-align:center">'
       +'<button onclick="exitAdminMode()" style="padding:10px 20px;border-radius:12px;border:1px solid rgba(200,230,220,0.15);background:transparent;color:rgba(200,230,220,0.4);font-weight:700;font-size:12px;cursor:pointer">👤 Passer en mode Visiteur</button>'
-    +'</div>'
-    +'<div style="background:rgba(255,140,0,0.05);border:1px solid rgba(255,140,0,0.15);border-radius:16px;padding:16px;margin-top:14px">'
+      +'</div>'):'')
+    +(S.mode==='admin'?('<div style="background:rgba(255,140,0,0.05);border:1px solid rgba(255,140,0,0.15);border-radius:16px;padding:16px;margin-top:14px">'
       +'<div class="input-label" style="color:#FF8C00;margin-bottom:4px">💾 SAUVEGARDE & PARTAGE</div>'
       +'<div style="font-size:11px;color:rgba(200,230,220,0.4);margin-bottom:14px;line-height:1.7">Exporte ta playlist en fichier JSON → partage-le à un autre musicien → il l\'importe et récupère toutes tes chansons.</div>'
       +'<button onclick="exportSongs()" style="width:100%;padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,#FF8C00,#FF4500);color:#fff;font-weight:900;font-size:14px;cursor:pointer;margin-bottom:10px">📤 Exporter ma playlist (.json)</button>'
@@ -3292,7 +3305,7 @@ function renderSettings(){
         +'<span style="color:rgba(200,230,220,0.3)">&#9675; BIENTOT</span> · Paiement CFP natif + abonnement<br/>'
         +'<span style="color:rgba(200,230,220,0.3)">&#9675; BIENTOT</span> · Depot marque INPI'
       +'</div>'
-    +'</div>';
+    +'</div>'):'');
 }
 
 // -- ACTIONS --
@@ -3457,7 +3470,7 @@ function toggleSL(id, sessionIdx){
   var idx=target.indexOf(id);
   if(idx>-1){
     target.splice(idx,1);
-    if(isActive){saveSL();}else{try{localStorage.setItem(SESK,JSON.stringify(S.sessions));}catch(e){}}
+    if(isActive){saveSL();}else{saveSessions();}
     showToast('Retiré de S'+(sessionIdx+1));
     render();
   } else {
@@ -3473,7 +3486,7 @@ function toggleSL(id, sessionIdx){
     var title=song?song.title:'cette chanson';
     function doAdd(){
       target.push(id);
-      if(isActive){saveSL();}else{try{localStorage.setItem(SESK,JSON.stringify(S.sessions));}catch(e){}}
+      if(isActive){saveSL();}else{saveSessions();}
       showToast('🎵 S'+(sessionIdx+1)+' ('+target.length+'/'+max+')');
       render();
     }
@@ -3521,7 +3534,7 @@ function stopPreparingSession(){
 function clearPreparedSession(idx){
   if(idx===S.activeSession)return;
   S.sessions[idx].setlist=[];
-  try{localStorage.setItem(SESK,JSON.stringify(S.sessions));}catch(e){}
+  saveSessions();
   showToast('🗑 Session '+(idx+1)+' vidée');
   render();
 }
