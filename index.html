@@ -391,16 +391,28 @@
 </div>
 
 <!-- =========================== GUEST SONG READER =========================== -->
-<div id="guest-song-modal" onclick="if(event.target===this)closeGuestSong()" style="display:none;position:fixed;inset:0;background:rgba(5,16,31,0.97);z-index:800;flex-direction:column">
-  <div style="padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(100,255,218,0.08);background:rgba(0,0,0,0.5);flex-shrink:0">
-    <button onclick="closeGuestSong()" style="background:rgba(255,100,100,0.15);border:none;border-radius:20px;padding:5px 12px;color:#FF6B6B;font-weight:700;font-size:13px;cursor:pointer">← Retour</button>
+<div id="guest-song-modal" onclick="if(event.target===this)closeGuestSong()" style="display:none;position:fixed;inset:0;background:#05101f;z-index:800;flex-direction:column">
+  <div style="padding:12px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(100,255,218,0.08);background:rgba(0,0,0,0.6);flex-shrink:0">
+    <button onclick="closeGuestSong()" style="background:rgba(255,100,100,0.15);border:none;border-radius:22px;padding:8px 14px;color:#FF6B6B;font-weight:800;font-size:14px;cursor:pointer;flex-shrink:0">← Retour</button>
     <div style="flex:1;min-width:0">
-      <div id="gsm-title" style="font-size:15px;font-weight:900;color:#64FFDA;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
-      <div id="gsm-artist" style="font-size:10px;color:rgba(200,230,220,0.35)"></div>
+      <div id="gsm-title" style="font-size:17px;font-weight:900;color:#64FFDA;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+      <div id="gsm-artist" style="font-size:12px;color:rgba(200,230,220,0.7)"></div>
     </div>
-    <div id="gsm-timer" style="font-size:12px;font-weight:900;color:#64FFDA;font-family:monospace;flex-shrink:0"></div>
+    <div id="gsm-timer" style="font-size:13px;font-weight:900;color:#64FFDA;font-family:monospace;flex-shrink:0"></div>
   </div>
-  <div id="gsm-content" style="flex:1;overflow-y:auto;padding:16px;max-width:600px;margin:0 auto;width:100%"></div>
+  <!-- Barre TON transposition personnelle du visiteur -->
+  <div style="flex-shrink:0;padding:8px 14px;background:rgba(0,0,0,0.4);border-bottom:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;gap:10px">
+    <span style="font-size:11px;font-weight:900;letter-spacing:1.5px;color:rgba(200,230,220,0.7);flex-shrink:0">♩ TON</span>
+    <button onclick="viewerTranspose(-1)" style="width:44px;height:44px;border-radius:50%;border:1px solid rgba(100,181,255,0.4);background:rgba(100,181,255,0.12);color:#64B5FF;font-size:20px;font-weight:900;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center">▼</button>
+    <button onclick="viewerTransposeReset()" id="gsm-transpose-lbl" style="flex:1;padding:10px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font-size:15px;font-weight:900;cursor:pointer;color:#e8f4f8;text-align:center;min-height:44px">0 ♩</button>
+    <button onclick="viewerTranspose(1)" style="width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,140,0,0.4);background:rgba(255,140,0,0.12);color:#FF8C00;font-size:20px;font-weight:900;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center">▲</button>
+  </div>
+  <div id="gsm-content" style="flex:1;overflow-y:auto;padding:22px 18px;max-width:640px;margin:0 auto;width:100%"></div>
+  <!-- Footer navigation Préc/Suivant entre chansons de la session -->
+  <div id="gsm-footer" style="padding:12px 14px calc(12px + env(safe-area-inset-bottom));border-top:1px solid rgba(100,255,218,0.08);background:rgba(0,0,0,0.6);flex-shrink:0;display:flex;gap:10px">
+    <button onclick="viewerPrev()" id="gsm-prev-btn" style="flex:1;padding:16px 8px;border-radius:14px;border:1px solid rgba(100,255,218,0.25);background:rgba(100,255,218,0.06);color:#64FFDA;font-weight:900;font-size:15px;cursor:pointer">← Précédent</button>
+    <button onclick="viewerNext()" id="gsm-next-btn" style="flex:1;padding:16px 8px;border-radius:14px;border:none;background:linear-gradient(135deg,#64FFDA,#00B894);color:#0a1628;font-weight:900;font-size:15px;cursor:pointer">Suivant →</button>
+  </div>
 </div>
 
 <!-- =========================== SESSION PREVIEW MODAL =========================== -->
@@ -3450,22 +3462,13 @@ function viewGuestSong(id){
   var freeMs=(gs.freeHours||3)*3600000;
   var sessionStart=gs.sessionStartTime||gs._sessionStart||Date.now();
   if(Date.now()-sessionStart>freeMs)return showToast('🔒 Session expirée');
-  // Trouver la chanson dans la session
-  var sg=(gs.songs||[]).find(function(x){return x.id===id;});
-  if(!sg)return;
-  // Remplir le modal
-  document.getElementById('gsm-title').textContent=sg.title;
-  document.getElementById('gsm-artist').textContent=sg.artist;
-  // Rendu paroles + accords (réutilise renderChordLyrics si dispo, sinon raw)
-  var content='';
-  if(sg.chordLyrics){
-    // Appel du renderer existant
-    var tmpSong=sg; S._guestReadSong=tmpSong;
-    content=renderChordLyricsHTML(sg.chordLyrics,0);
-  } else {
-    content='<pre style="font-size:13px;color:rgba(200,230,220,0.7);white-space:pre-wrap;line-height:1.8">'+esc(sg.lyrics||'Pas de paroles')+'</pre>';
-  }
-  document.getElementById('gsm-content').innerHTML=content;
+  // Trouver la chanson dans la session + memoriser l'index pour Prec/Suivant
+  var idx=(gs.songs||[]).findIndex(function(x){return x.id===id;});
+  if(idx<0)return;
+  S._guestReadIdx=idx;
+  S._guestReadTranspose=0; // reset a chaque ouverture d'une nouvelle chanson
+  renderGuestSongModal();
+  // Afficher le modal une seule fois (pas au switch Prec/Suivant)
   document.getElementById('guest-song-modal').style.display='flex';
   // Timer live dans le header du modal
   if(window._gsmTimer)clearInterval(window._gsmTimer);
@@ -3485,30 +3488,90 @@ function viewGuestSong(id){
     if(el)el.textContent=(tlH>0?tlH+'h ':'')+('0'+tlM).slice(-2)+'m '+('0'+tlS).slice(-2)+'s';
   },1000);
 }
+
+// Re-render du contenu (titre + accords/paroles + transpose) sans reouvrir le modal
+function renderGuestSongModal(){
+  var gs=S.guestSession;
+  if(!gs)return;
+  var sg=(gs.songs||[])[S._guestReadIdx||0];
+  if(!sg)return;
+  document.getElementById('gsm-title').textContent=sg.title||'';
+  document.getElementById('gsm-artist').textContent=sg.artist||'';
+  var tr=S._guestReadTranspose||0;
+  // Label transposition
+  var lbl=document.getElementById('gsm-transpose-lbl');
+  if(lbl){
+    lbl.textContent=(tr===0?'0 ♩':(tr>0?'+'+tr:String(tr))+' ♩');
+    lbl.style.color=tr===0?'#e8f4f8':(tr>0?'#FF8C00':'#64B5FF');
+  }
+  // Rendu paroles + accords (style perf-like XL)
+  var content='';
+  if(sg.chordLyrics){
+    content=renderChordLyricsHTML(sg.chordLyrics,tr);
+  } else {
+    content='<pre style="font-size:20px;color:#e8f4f8;white-space:pre-wrap;line-height:2;font-family:inherit">'+esc(sg.lyrics||'Pas de paroles')+'</pre>';
+  }
+  document.getElementById('gsm-content').innerHTML=content;
+  // Etat des boutons Prec/Suivant
+  var prevBtn=document.getElementById('gsm-prev-btn');
+  var nextBtn=document.getElementById('gsm-next-btn');
+  var total=(gs.songs||[]).length;
+  if(prevBtn){prevBtn.disabled=(S._guestReadIdx<=0);prevBtn.style.opacity=(S._guestReadIdx<=0)?'0.4':'1';}
+  if(nextBtn){nextBtn.disabled=(S._guestReadIdx>=total-1);nextBtn.style.opacity=(S._guestReadIdx>=total-1)?'0.4':'1';}
+  // Scroll top pour la nouvelle chanson
+  var cnt=document.getElementById('gsm-content');
+  if(cnt)cnt.scrollTop=0;
+}
+
+// Navigation entre chansons de la session (INDEPENDANTE de l'admin)
+function viewerPrev(){
+  var gs=S.guestSession;if(!gs)return;
+  if((S._guestReadIdx||0)<=0)return;
+  S._guestReadIdx=(S._guestReadIdx||0)-1;
+  S._guestReadTranspose=0;
+  renderGuestSongModal();
+}
+function viewerNext(){
+  var gs=S.guestSession;if(!gs)return;
+  var total=(gs.songs||[]).length;
+  if((S._guestReadIdx||0)>=total-1)return;
+  S._guestReadIdx=(S._guestReadIdx||0)+1;
+  S._guestReadTranspose=0;
+  renderGuestSongModal();
+}
+// Transposition personnelle du visiteur (INDEPENDANTE de l'admin)
+function viewerTranspose(delta){
+  S._guestReadTranspose=(S._guestReadTranspose||0)+delta;
+  renderGuestSongModal();
+}
+function viewerTransposeReset(){
+  S._guestReadTranspose=0;
+  renderGuestSongModal();
+}
 function closeGuestSong(){
   if(window._gsmTimer){clearInterval(window._gsmTimer);window._gsmTimer=null;}
   document.getElementById('guest-song-modal').style.display='none';
 }
-// Render chord lyrics HTML (version lecture seule visiteur)
+// Render chord lyrics HTML (version lecture visiteur — style perf XL)
 function renderChordLyricsHTML(cl,transpose){
   if(!cl)return'';
   var lines=cl.split('\n');
   var html='';
   lines.forEach(function(line){
     var trimmed=line.trim();
-    if(!trimmed){html+='<div style="height:10px"></div>';return;}
+    if(!trimmed){html+='<div style="height:14px"></div>';return;}
     var isChord=/^\[/.test(trimmed);
     if(isChord){
       var chords=trimmed.match(/\[([^\]]+)\]/g)||[];
-      html+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px">';
+      html+='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px;margin-top:6px">';
       chords.forEach(function(c){
         var ch=c.slice(1,-1);
         if(transpose){ch=transposeChord(ch,transpose);}
-        html+='<span style="display:inline-block;padding:2px 8px;border-radius:5px;border:1px solid rgba(100,255,218,0.3);background:rgba(100,255,218,0.07);font-size:11px;font-weight:900;color:#64FFDA">'+esc(ch)+'</span>';
+        html+='<span style="display:inline-block;padding:6px 12px;border-radius:9px;border:1px solid rgba(100,255,218,0.4);background:rgba(100,255,218,0.1);font-size:15px;font-weight:900;color:#64FFDA;min-width:38px;text-align:center">'+esc(ch)+'</span>';
       });
       html+='</div>';
     } else {
-      html+='<div style="font-size:14px;color:rgba(200,230,220,0.8);line-height:1.9;margin-bottom:2px">'+esc(line)+'</div>';
+      html+='<div style="font-size:22px;font-weight:700;color:#f0f8fa;line-height:1.7;margin-bottom:6px;letter-spacing:0.3px">'+esc(line)+'</div>';
     }
   });
   return html;
