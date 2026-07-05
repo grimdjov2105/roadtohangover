@@ -3482,6 +3482,9 @@ function viewGuestSong(id){
   S._guestReadTranspose=0; // reset a chaque ouverture d'une nouvelle chanson
   renderGuestSongModal();
   viewerResetPlayer(); // reset barre progression + timer
+  // AUTO-DEFILEMENT : demarrer la lecture immediatement, sans clic sur play
+  // Petit delai pour laisser le DOM se stabiliser (spans crees + modal visible)
+  setTimeout(function(){if(!VP.playing)viewerTogglePlay();},150);
   // Afficher le modal une seule fois (pas au switch Prec/Suivant)
   document.getElementById('guest-song-modal').style.display='flex';
   // Timer live dans le header du modal
@@ -3519,11 +3522,15 @@ function renderGuestSongModal(){
     lbl.style.color=tr===0?'#e8f4f8':(tr>0?'#FF8C00':'#64B5FF');
   }
   // Rendu paroles + accords (style perf-like XL)
+  // CRITIQUE : toujours passer par renderChordLyricsHTML pour peupler VP.words
+  // → sinon aucun mot n'a d'ID, donc pas de karaoke ni scroll.
   var content='';
-  if(sg.chordLyrics){
-    content=renderChordLyricsHTML(sg.chordLyrics,tr);
+  var textToRender=sg.chordLyrics||sg.lyrics;
+  if(textToRender){
+    content=renderChordLyricsHTML(textToRender,tr);
   } else {
-    content='<pre style="font-size:20px;color:#e8f4f8;white-space:pre-wrap;line-height:2;font-family:inherit">'+esc(sg.lyrics||'Pas de paroles')+'</pre>';
+    content='<div style="text-align:center;padding:40px;color:rgba(200,230,220,0.5);font-size:16px">Pas de paroles</div>';
+    if(window.VP){VP.words=[];VP.totalDur=60;}
   }
   document.getElementById('gsm-content').innerHTML=content;
   // Etat des boutons Prec/Suivant
@@ -3545,6 +3552,7 @@ function viewerPrev(){
   S._guestReadTranspose=0;
   renderGuestSongModal();
   viewerResetPlayer();
+  setTimeout(function(){if(!VP.playing)viewerTogglePlay();},150);
 }
 function viewerNext(){
   var gs=S.guestSession;if(!gs)return;
@@ -3554,6 +3562,7 @@ function viewerNext(){
   S._guestReadTranspose=0;
   renderGuestSongModal();
   viewerResetPlayer();
+  setTimeout(function(){if(!VP.playing)viewerTogglePlay();},150);
 }
 // Transposition personnelle du visiteur (INDEPENDANTE de l'admin)
 function viewerTranspose(delta){
@@ -3663,7 +3672,8 @@ function renderChordLyricsHTML(cl,transpose){
   var gs=S.guestSession;
   var sg=gs?(gs.songs||[])[S._guestReadIdx||0]:null;
   var bpm=(sg&&sg.bpm)||80;
-  var beatSec=60/bpm;
+  var rate=(typeof getTempoRate==='function')?getTempoRate(sg&&sg.tempo||'normal'):1.0;
+  var beatSec=(60/bpm)/rate;
   var wDur=beatSec*1.5;
 
   var lines=cl.split('\n');
@@ -3691,11 +3701,11 @@ function renderChordLyricsHTML(cl,transpose){
       }
     } else {
       // Ligne accords seule (format G D Em) OU paroles seules
-      // Detection secondaire : si tous les tokens sont des accords → chord-line
+      // Detection stricte : au moins 2 tokens ET tous les tokens matchent un accord
+      // (evite qu'un mot polynesien isole "E" ou "A" soit pris pour un accord)
       var toks=trimmed.split(/\s+/).filter(Boolean);
-      var isAllChords=toks.length>0&&toks.every(function(t){
-        return /^[A-G](#|b)?(m|maj|dim|aug|sus|add)?[0-9]?(\/[A-G](#|b)?)?$/.test(t);
-      });
+      var chordRe=/^[A-G](#|b)?(m|maj|dim|aug|sus|add)?[0-9]?(sus[0-9])?(\/[A-G](#|b)?)?$/;
+      var isAllChords=toks.length>=2&&toks.every(function(t){return chordRe.test(t);});
       if(isAllChords){
         items.push({type:'chord-line',text:trimmed,line:li,idx:idx++});
       } else {
@@ -3786,12 +3796,9 @@ function _viewerUpdateKaraoke(t){
     if(el){
       el.style.color='#FFD700';
       el.style.textShadow='0 0 18px rgba(255,215,0,0.75),0 0 6px rgba(255,215,0,0.5)';
-      // Scroll doux vers le mot actif dans le container
-      var cnt=document.getElementById('gsm-content');
-      if(cnt){
-        var target=el.offsetTop-cnt.offsetTop-cnt.clientHeight*0.4;
-        cnt.scrollTo({top:Math.max(0,target),behavior:'smooth'});
-      }
+      // Scroll doux vers le mot actif — scrollIntoView gere le container scrollable
+      // parent automatiquement, plus fiable qu'un calcul offsetTop manuel.
+      try{el.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});}catch(e){}
     }
   }
   VP.idx=ni;
