@@ -615,6 +615,7 @@ var S={
   adminWhatsApp:'',
   adminPwdSet:false,
   inGuestPerf:false, guestPerfIndex:0, guestPerfSongs:[], guestPerfDismissed:false, displayedSession:0,
+  _lastPerfActive:false,
   sessions:[
     {name:'Session 1',setlist:[]},
     {name:'Session 2',setlist:[]},
@@ -808,26 +809,30 @@ function startFirestoreSync(){
         return;
       }
     }
-    // -- Sync performance admin → visiteurs --
+    // -- Sync performance admin → visiteurs (LANCEMENT UNIQUEMENT) --
+    // Regle absolue : SEUL le premier passage de perfActive false→true declenche
+    // une action visible chez le visiteur. Tout autre changement admin (Suivant/
+    // Precedent/Pause/Transposition/perfIndex) est IGNORE pour ne pas interferer.
     if(S.mode!=='admin'&&S.guestSession){
-      if(data.perfActive===true&&typeof data.perfIndex==='number'){
-        // Utiliser perfSongs (ordre setlist) si disponible, sinon songs
-        // CRUCIAL : perfSongs est dans l'ordre de la setlist, songs est la bibliothèque complète
+      var wasActive=S._lastPerfActive===true;
+      var isActive=(data.perfActive===true);
+      if(isActive&&!wasActive){
+        // Transition inactive→active : lancement de la performance par l'admin.
+        // Debloque l'acces aux chansons sans jamais forcer une vue.
         var freshSongs=(data.perfSongs&&Array.isArray(data.perfSongs)&&data.perfSongs.length>0)
           ? data.perfSongs
           : (data.songs&&Array.isArray(data.songs)&&data.songs.length>0 ? data.songs : null);
-        if(freshSongs){
-          S.guestSession.songs=freshSongs;
-          S.guestSession.sessionStartTime=data.sessionStartTime||S.guestSession.sessionStartTime;
-          S.guestSession.freeHours=data.freeHours||S.guestSession.freeHours;
-          try{localStorage.setItem('rth-guest-session',JSON.stringify(S.guestSession));}catch(e){}
-        }
-        S.guestPerfSongs=S.guestSession.songs||[];
-        handleGuestPerfSync(data.perfIndex, data.sessionStartTime, data.freeHours, data.perfTranspose||0);
-      } else if(data.perfActive===false){
-        // Admin arrete la perf : le visiteur reste sur son ecran, aucune interference.
-        // On ne l'ejecte QUE si il est lui-meme dans son propre mode perf (choix personnel).
+        if(freshSongs){S.guestSession.songs=freshSongs;}
+        S.guestSession.sessionStartTime=data.sessionStartTime||S.guestSession.sessionStartTime;
+        S.guestSession.freeHours=data.freeHours||S.guestSession.freeHours;
+        try{localStorage.setItem('rth-guest-session',JSON.stringify(S.guestSession));}catch(e){}
+        if(S.view==='guest'||S.view==='visitor-home')render();
+        showToast('🎸 Session lancée — chansons débloquées !');
       }
+      // isActive && wasActive : admin fait Suivant/Precedent/Pause/etc.
+      //   → AUCUNE action, le visiteur reste totalement independant.
+      // !isActive : admin arrete la perf → le visiteur reste sur son ecran.
+      S._lastPerfActive=isActive;
     }
     // Re-render seulement si contenu vraiment changé
     if(changed){
@@ -1540,21 +1545,10 @@ function syncPerfState(active){
 
 // -- VISITEUR : RÉCEPTION CHANGEMENT CHANSON ADMIN --
 function handleGuestPerfSync(perfIndex, sessionStartTime, freeHours, perfTranspose){
-  // ACCES AUX CHANSONS UNIQUEMENT — aucune interference avec l'ecran visiteur.
-  // Le lancement de la perf par l'admin debloque l'acces aux chansons via le timer.
-  // Le visiteur reste sur son ecran (guest home), navigue independamment.
-  // Les actions admin (Suivant/Precedent/Pause/Transposition) N'AFFECTENT PLUS l'ecran visiteur.
-  if(sessionStartTime&&sessionStartTime>0){
-    if(S.guestSession){
-      S.guestSession.sessionStartTime=sessionStartTime;
-      S.guestSession.freeHours=freeHours||3;
-      try{localStorage.setItem('rth-guest-session',JSON.stringify(S.guestSession));}catch(e){}
-    }
-  }
-  // Re-render de l'ecran guest si actif → chansons debloquees visuellement
-  if(S.view==='guest'||S.view==='visitor-home'){
-    render();
-  }
+  // FONCTION NEUTRALISEE : plus aucune interference admin→visiteur.
+  // La synchronisation du lancement est desormais geree dans le onSnapshot
+  // (transition perfActive false→true uniquement).
+  return;
 }
 
 // -- QR CODE --
