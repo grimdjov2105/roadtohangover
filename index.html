@@ -3573,20 +3573,21 @@ function closeGuestSong(){
 // ============ MINI-PLAYER VISITEUR (barre de progression + timer) ============
 // Etat local isole du mode perf admin. Pas d'audio MP3 : progression visuelle
 // calculee depuis BPM + nombre de mots (comme le mode perf).
-window.VP={playing:false,elapsed:0,totalDur:0,timer:null,startRef:0};
+window.VP={playing:false,elapsed:0,totalDur:0,timer:null,startRef:0,words:[],idx:-1};
 function _viewerFmt(s){s=Math.max(0,Math.floor(s));var m=Math.floor(s/60);var sec=s%60;return m+':'+(sec<10?'0':'')+sec;}
 function _viewerCalcDur(){
+  // Priorite : duree calculee depuis VP.words (mise a jour par renderChordLyricsHTML)
+  if(window.VP&&VP.totalDur>0)return VP.totalDur;
   var gs=S.guestSession;if(!gs)return 60;
   var sg=(gs.songs||[])[S._guestReadIdx||0];if(!sg)return 60;
   var bpm=sg.bpm||80;
   var beatSec=60/bpm;
   var wDur=beatSec*1.5;
   var text=sg.chordLyrics||sg.lyrics||'';
-  // Compter les mots reels (hors accords entre crochets et lignes accords)
   var cleaned=text.replace(/\[[^\]]*\]/g,' ').replace(/\n/g,' ');
   var words=cleaned.split(/\s+/).filter(function(w){return w.length>0;});
   var n=words.length;
-  return Math.max(30, n*wDur + 3); // 3s de buffer, min 30s
+  return Math.max(30, n*wDur + 3);
 }
 function _viewerRefreshUI(){
   var btn=document.getElementById('gsm-play-btn');
@@ -3608,7 +3609,9 @@ function _viewerRefreshUI(){
 }
 function viewerResetPlayer(){
   viewerStop();
+  _viewerResetWords();
   VP.elapsed=0;
+  VP.idx=-1;
   VP.totalDur=_viewerCalcDur();
   _viewerRefreshUI();
 }
@@ -3619,16 +3622,16 @@ function viewerTogglePlay(){
   VP.startRef=Date.now()-VP.elapsed*1000;
   VP.timer=setInterval(function(){
     VP.elapsed=(Date.now()-VP.startRef)/1000;
+    _viewerUpdateKaraoke(VP.elapsed); // scroll auto + highlight mot par mot
     if(VP.elapsed>=VP.totalDur){
       VP.elapsed=VP.totalDur;
       _viewerRefreshUI();
       viewerStop();
-      // Auto-passe a la chanson suivante si dispo
       var gs=S.guestSession;
       var total=gs?(gs.songs||[]).length:0;
       if((S._guestReadIdx||0)<total-1){
         viewerNext();
-        setTimeout(viewerTogglePlay,300); // enchaine
+        setTimeout(viewerTogglePlay,300);
       }
       return;
     }
@@ -3648,31 +3651,161 @@ function viewerSeek(e){
   var pct=(e.clientX-rect.left)/rect.width;
   VP.elapsed=Math.max(0,Math.min(VP.totalDur,pct*VP.totalDur));
   if(VP.playing){VP.startRef=Date.now()-VP.elapsed*1000;}
+  // Recalculer l'etat karaoke a partir du nouveau temps (highlight+scroll instant)
+  _viewerResetWords();
+  _viewerUpdateKaraoke(VP.elapsed);
   _viewerRefreshUI();
 }
-// Render chord lyrics HTML (version lecture visiteur — style perf XL)
+// Render chord lyrics HTML (version lecture visiteur — style perf XL avec defilement auto)
+// Effet de bord : remplit window.VP.words avec les timestamps calcules depuis BPM
 function renderChordLyricsHTML(cl,transpose){
-  if(!cl)return'';
+  if(!cl){window.VP&&(VP.words=[]);return'';}
+  var gs=S.guestSession;
+  var sg=gs?(gs.songs||[])[S._guestReadIdx||0]:null;
+  var bpm=(sg&&sg.bpm)||80;
+  var beatSec=60/bpm;
+  var wDur=beatSec*1.5;
+
   var lines=cl.split('\n');
-  var html='';
-  lines.forEach(function(line){
+  var items=[]; var idx=0;
+  lines.forEach(function(line,li){
     var trimmed=line.trim();
-    if(!trimmed){html+='<div style="height:14px"></div>';return;}
-    var isChord=/^\[/.test(trimmed);
-    if(isChord){
-      var chords=trimmed.match(/\[([^\]]+)\]/g)||[];
-      html+='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px;margin-top:6px">';
-      chords.forEach(function(c){
-        var ch=c.slice(1,-1);
-        if(transpose){ch=transposeChord(ch,transpose);}
-        html+='<span style="display:inline-block;padding:6px 12px;border-radius:9px;border:1px solid rgba(100,255,218,0.4);background:rgba(100,255,218,0.1);font-size:15px;font-weight:900;color:#64FFDA;min-width:38px;text-align:center">'+esc(ch)+'</span>';
-      });
-      html+='</div>';
+    if(!trimmed){items.push({type:'blank',line:li,idx:idx++});return;}
+    // Ligne d'accords seule → affichee mais hors timing
+    if(typeof isChordOnlyLine==='function'&&isChordOnlyLine(trimmed)){
+      items.push({type:'chord-line',text:trimmed,line:li,idx:idx++});
+      return;
+    }
+    // Ligne mixte accords+paroles (ex: "[G]Hello [D]world")
+    if(trimmed.indexOf('[')>=0){
+      var re=/\[([^\]]+)\]([^\[]*)/g; var m;
+      while((m=re.exec(trimmed))!==null){
+        var chord=m[1].trim();
+        var lyr=m[2].trim();
+        if(chord){items.push({type:'chord-inline',text:chord,line:li,idx:idx++});}
+        if(lyr){
+          lyr.split(/\s+/).filter(Boolean).forEach(function(w){
+            items.push({type:'word',text:w,line:li,idx:idx++});
+          });
+        }
+      }
     } else {
-      html+='<div style="font-size:22px;font-weight:700;color:#f0f8fa;line-height:1.7;margin-bottom:6px;letter-spacing:0.3px">'+esc(line)+'</div>';
+      // Ligne accords seule (format G D Em) OU paroles seules
+      // Detection secondaire : si tous les tokens sont des accords → chord-line
+      var toks=trimmed.split(/\s+/).filter(Boolean);
+      var isAllChords=toks.length>0&&toks.every(function(t){
+        return /^[A-G](#|b)?(m|maj|dim|aug|sus|add)?[0-9]?(\/[A-G](#|b)?)?$/.test(t);
+      });
+      if(isAllChords){
+        items.push({type:'chord-line',text:trimmed,line:li,idx:idx++});
+      } else {
+        toks.forEach(function(w){
+          items.push({type:'word',text:w,line:li,idx:idx++});
+        });
+      }
     }
   });
+
+  // Timestamps BPM sur les mots uniquement
+  var t=1.2;
+  items.forEach(function(it){
+    if(it.type==='word'){it.start=t;it.end=t+wDur;t=it.end;}
+    else{it.start=t;it.end=t;}
+  });
+  var realWords=items.filter(function(it){return it.type==='word';});
+  var totalDur=realWords.length>0?realWords[realWords.length-1].end+2.5:30;
+
+  // Exposer aux fonctions du player
+  if(window.VP){VP.words=items;VP.totalDur=totalDur;}
+
+  // Rendu HTML par ligne
+  var byLine={};
+  items.forEach(function(it){if(!byLine[it.line])byLine[it.line]=[];byLine[it.line].push(it);});
+  var html='';
+  Object.values(byLine).forEach(function(lItems){
+    // Ligne vide
+    if(lItems.length===1&&lItems[0].type==='blank'){html+='<div style="height:14px"></div>';return;}
+    // Ligne d'accords seule → badges verts au-dessus
+    if(lItems.length===1&&lItems[0].type==='chord-line'){
+      var chords=lItems[0].text.split(/\s+/).filter(Boolean);
+      html+='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px;margin-top:6px">';
+      chords.forEach(function(c){
+        var cc=transpose?transposeChord(c,transpose):c;
+        html+='<span style="display:inline-block;padding:6px 12px;border-radius:9px;border:1px solid rgba(100,255,218,0.4);background:rgba(100,255,218,0.1);font-size:15px;font-weight:900;color:#64FFDA;min-width:38px;text-align:center">'+esc(cc)+'</span>';
+      });
+      html+='</div>';
+      return;
+    }
+    // Ligne mixte : accords inline + paroles
+    html+='<div class="gsm-line" style="display:block;margin-bottom:8px;line-height:1.9">';
+    lItems.forEach(function(it){
+      if(it.type==='chord-inline'){
+        var cc=transpose?transposeChord(it.text,transpose):it.text;
+        html+='<span class="gsm-chord" style="display:inline-block;padding:2px 8px;border-radius:7px;border:1px solid rgba(100,255,218,0.35);background:rgba(100,255,218,0.1);font-size:13px;font-weight:900;color:#64FFDA;margin-right:4px;vertical-align:super;position:relative;top:-4px">'+esc(cc)+'</span>';
+      } else if(it.type==='word'){
+        html+='<span class="gsm-w" id="gsm-w-'+it.idx+'" style="display:inline-block;font-size:22px;font-weight:700;color:#f0f8fa;margin-right:6px;transition:color 0.15s,text-shadow 0.15s;letter-spacing:0.3px">'+esc(it.text)+'</span>';
+      }
+    });
+    html+='</div>';
+  });
   return html;
+}
+
+// Karaoke visiteur : allume le mot actif + scroll auto (style perf)
+function _viewerUpdateKaraoke(t){
+  if(!window.VP||!VP.words||VP.words.length===0)return;
+  var ni=-1;
+  for(var i=VP.words.length-1;i>=0;i--){
+    if(VP.words[i].type==='word'&&t>=VP.words[i].start){ni=i;break;}
+  }
+  if(ni===VP.idx)return;
+  // Retirer l'etat actif du precedent + marquer tous les mots entre en "done"
+  // (important lors d'un seek : sauts de plusieurs mots d'un coup)
+  var from=Math.min(VP.idx,ni);
+  var to=Math.max(VP.idx,ni);
+  for(var k=from;k>=0&&k<=to;k++){
+    if(k===ni)continue;
+    var it=VP.words[k];
+    if(!it||it.type!=='word')continue;
+    var doneEl=document.getElementById('gsm-w-'+k);
+    if(doneEl){
+      if(k<ni){
+        // mot passe → teal pale
+        doneEl.style.color='rgba(100,255,218,0.55)';
+        doneEl.style.textShadow='';
+      } else {
+        // mot futur → blanc
+        doneEl.style.color='#f0f8fa';
+        doneEl.style.textShadow='';
+      }
+    }
+  }
+  // Allumer le mot actif
+  if(ni>=0){
+    var el=document.getElementById('gsm-w-'+ni);
+    if(el){
+      el.style.color='#FFD700';
+      el.style.textShadow='0 0 18px rgba(255,215,0,0.75),0 0 6px rgba(255,215,0,0.5)';
+      // Scroll doux vers le mot actif dans le container
+      var cnt=document.getElementById('gsm-content');
+      if(cnt){
+        var target=el.offsetTop-cnt.offsetTop-cnt.clientHeight*0.4;
+        cnt.scrollTo({top:Math.max(0,target),behavior:'smooth'});
+      }
+    }
+  }
+  VP.idx=ni;
+}
+// Reset visuel des mots (au reset player / changement de chanson)
+function _viewerResetWords(){
+  if(!window.VP||!VP.words)return;
+  VP.words.forEach(function(w){
+    if(w.type==='word'){
+      var el=document.getElementById('gsm-w-'+w.idx);
+      if(el){el.style.color='#f0f8fa';el.style.textShadow='';}
+    }
+  });
+  VP.idx=-1;
 }
 
 function closeDoublonModal(){
