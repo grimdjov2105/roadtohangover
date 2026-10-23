@@ -171,7 +171,7 @@
     }
 
     /* ============================================================
-       ERGONOMIE MOBILE v13 — MYOPIE FRIENDLY
+       ERGONOMIE MOBILE v14 — MYOPIE FRIENDLY
        Tailles +30% et contrastes remontes (rgba 0.35 → 0.75).
        ============================================================ */
 
@@ -689,9 +689,7 @@ try{
           S.guestVerifying=false;
           if(!doc.exists||S.mode==='admin'){render();return;}
           var d=doc.data();
-          var kickedAt=d.forceDisconnectAt||0;
-          var joinedAt=_gsParsed._sessionStart||_gsStart||0;
-          if(d.forceDisconnect&&kickedAt>joinedAt){
+          if(kickedSinceJoin(d,_gsParsed)){
             // L'admin a déconnecté tous les visiteurs après leur arrivée : on efface la session
             // localement, sinon elle réapparaît au rafraîchissement.
             S.guestSession=null;S.guestVerifying=false;S.inGuestPerf=false;
@@ -718,9 +716,7 @@ try{
             S.guestVerifying=false;
             if(doc2.exists&&S.mode!=='admin'){
               var d2=doc2.data();
-              var kickedAt=d2.forceDisconnectAt||0;
-              var joinedAt=_gsParsed._sessionStart||_gsStart||0;
-              if(d2.forceDisconnect&&kickedAt>joinedAt){
+              if(kickedSinceJoin(d2,_gsParsed)){
                 // L'admin a déconnecté tous les visiteurs après leur arrivée : on efface la session
                 // localement, sinon elle réapparaît au rafraîchissement.
                 S.guestSession=null;S.guestVerifying=false;S.inGuestPerf=false;
@@ -858,9 +854,7 @@ function startFirestoreSync(){
     }
     // -- Force déconnexion visiteurs --
     if(S.mode!=='admin'&&S.guestSession&&data.forceDisconnect){
-      var lastKick=data.forceDisconnectAt||0;
-      var joinTime=S.guestSession._sessionStart||S.guestSession.sessionStartTime||0;
-      if(lastKick>joinTime){
+      if(kickedSinceJoin(data,S.guestSession)){
         stopFirestoreSync();
         S.guestSession=null;
         S.inGuestPerf=false;
@@ -935,6 +929,7 @@ startFirestoreSync();
     if(!decoded||!decoded.songs||!decoded.code)return;
     var savedStart=parseInt(localStorage.getItem('rth-session-start')||'0');
     decoded._sessionStart=savedStart||Date.now();
+    decoded._kickAt=decoded.forceDisconnectAt||0;
     if(!savedStart)try{localStorage.setItem('rth-session-start',String(decoded._sessionStart));}catch(e){}
     S.guestSession=decoded;startFirestoreSync();
     S.guestVerifying=false; // Jointure fraîche depuis Firestore = déjà vérifiée
@@ -1837,13 +1832,21 @@ async function getSessionURL(){
   return appBaseURL()+'?s='+fb;
 }
 // -- SAUVEGARDE SESSION DANS FIRESTORE (room court) --
+// Déconnexion : le visiteur est coupé si l'admin a déconnecté la salle après son arrivée.
+// On compare deux valeurs écrites par l'admin (forceDisconnectAt), pas l'heure du téléphone.
+function kickedSinceJoin(room,gs){
+  if(!room||!room.forceDisconnect||!gs)return false;
+  var since=(typeof gs._kickAt==='number')?gs._kickAt:(gs._sessionStart||gs.sessionStartTime||0);
+  return (room.forceDisconnectAt||0)>since;
+}
 function saveRoomToFirestore(roomCode){
   if(!roomCode)return Promise.resolve();
   var data=buildSessionData(true);
   if(!data)return Promise.resolve();
   data.code=roomCode;
   return _fbDB.collection('rooms').doc(roomCode).set(
-    Object.assign({},data,{savedAt:firebase.firestore.FieldValue.serverTimestamp()})
+    Object.assign({},data,{savedAt:firebase.firestore.FieldValue.serverTimestamp()}),
+    {merge:true}
   ).catch(function(e){console.warn('Room save err:',e);});
 }
 // -- URL courte ?room= --
@@ -2787,6 +2790,7 @@ function doVisitorJoin(){
   function applyDecoded(decoded){
     if(!decoded||!decoded.songs||!decoded.code)return showToast('Session invalide');
     decoded._sessionStart=Date.now();
+    decoded._kickAt=decoded.forceDisconnectAt||0;
     S.guestSession=decoded;startFirestoreSync();S.view='guest';render();
     try{localStorage.setItem('rth-session-start',String(decoded._sessionStart));}catch(e){}
     showToast('🎸 Session '+decoded.code+' — bienvenue !');
