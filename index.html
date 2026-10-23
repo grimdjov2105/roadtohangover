@@ -171,7 +171,7 @@
     }
 
     /* ============================================================
-       ERGONOMIE MOBILE v11 — MYOPIE FRIENDLY
+       ERGONOMIE MOBILE v12 — MYOPIE FRIENDLY
        Tailles +30% et contrastes remontes (rgba 0.35 → 0.75).
        ============================================================ */
 
@@ -1584,7 +1584,9 @@ function liveHeartbeatOff(){
 function handleLive(L){
   if(!L||!S.guestSession)return;
   if(!L.on){
-    if(S.inGuestPerf)followStop();
+    // L'admin a arrêté la performance : le visiteur NE s'arrête PAS.
+    // Il garde son écran et son propre minutage, et peut continuer seul.
+    PF.follow=false;
     return;
   }
   if(L.id!==PF.followId){PF.followId=L.id;S.guestPerfDismissed=false;}
