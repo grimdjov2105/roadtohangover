@@ -171,7 +171,7 @@
     }
 
     /* ============================================================
-       ERGONOMIE MOBILE v12 — MYOPIE FRIENDLY
+       ERGONOMIE MOBILE v13 — MYOPIE FRIENDLY
        Tailles +30% et contrastes remontes (rgba 0.35 → 0.75).
        ============================================================ */
 
@@ -689,6 +689,17 @@ try{
           S.guestVerifying=false;
           if(!doc.exists||S.mode==='admin'){render();return;}
           var d=doc.data();
+          var kickedAt=d.forceDisconnectAt||0;
+          var joinedAt=_gsParsed._sessionStart||_gsStart||0;
+          if(d.forceDisconnect&&kickedAt>joinedAt){
+            // L'admin a déconnecté tous les visiteurs après leur arrivée : on efface la session
+            // localement, sinon elle réapparaît au rafraîchissement.
+            S.guestSession=null;S.guestVerifying=false;S.inGuestPerf=false;
+            try{localStorage.removeItem('rth-guest-session');localStorage.removeItem('rth-session-start');}catch(e){}
+            S.view='visitor-home';render();
+            showToast('⛔ Session terminée par l\'admin');
+            return;
+          }
           var fsStart=typeof d.sessionStartTime==='number'?d.sessionStartTime:_gsStart;
           var fsFreeHours=d.freeHours||_gsParsed.freeHours||3;
           var fsFreeMs=fsFreeHours*3600000;
@@ -707,6 +718,18 @@ try{
             S.guestVerifying=false;
             if(doc2.exists&&S.mode!=='admin'){
               var d2=doc2.data();
+              var kickedAt=d2.forceDisconnectAt||0;
+              var joinedAt=_gsParsed._sessionStart||_gsStart||0;
+              if(d2.forceDisconnect&&kickedAt>joinedAt){
+                // L'admin a déconnecté tous les visiteurs après leur arrivée : on efface la session
+                // localement, sinon elle réapparaît au rafraîchissement.
+                S.guestSession=null;S.guestVerifying=false;S.inGuestPerf=false;
+                try{localStorage.removeItem('rth-guest-session');localStorage.removeItem('rth-session-start');}catch(e){}
+                S.view='visitor-home';render();
+                showToast('⛔ Session terminée par l\'admin');
+                return;
+              }
+
               var fsStart2=typeof d2.sessionStartTime==='number'?d2.sessionStartTime:_gsStart;
               if(S.guestSession){
                 S.guestSession.sessionStartTime=fsStart2;
