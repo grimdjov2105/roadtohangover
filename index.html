@@ -171,7 +171,7 @@
     }
 
     /* ============================================================
-       ERGONOMIE MOBILE v14 — MYOPIE FRIENDLY
+       ERGONOMIE MOBILE v15 — MYOPIE FRIENDLY
        Tailles +30% et contrastes remontes (rgba 0.35 → 0.75).
        ============================================================ */
 
@@ -1836,7 +1836,8 @@ async function getSessionURL(){
 // On compare deux valeurs écrites par l'admin (forceDisconnectAt), pas l'heure du téléphone.
 function kickedSinceJoin(room,gs){
   if(!room||!room.forceDisconnect||!gs)return false;
-  var since=(typeof gs._kickAt==='number')?gs._kickAt:(gs._sessionStart||gs.sessionStartTime||0);
+  // Session jointe avant la v14 (pas de marqueur) : toute déconnexion de la salle la coupe.
+  var since=(typeof gs._kickAt==='number')?gs._kickAt:0;
   return (room.forceDisconnectAt||0)>since;
 }
 function saveRoomToFirestore(roomCode){
