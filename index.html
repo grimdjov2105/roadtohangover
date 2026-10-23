@@ -171,7 +171,7 @@
     }
 
     /* ============================================================
-       ERGONOMIE MOBILE v10 — MYOPIE FRIENDLY
+       ERGONOMIE MOBILE v11 — MYOPIE FRIENDLY
        Tailles +30% et contrastes remontes (rgba 0.35 → 0.75).
        ============================================================ */
 
@@ -1579,6 +1579,16 @@ function handleLive(L){
   }
   if(L.id!==PF.followId){PF.followId=L.id;S.guestPerfDismissed=false;}
   if(S.guestPerfDismissed)return;
+  if(!S.guestSession.songs||S.guestSession.songs.length===0){
+    // Les chansons n'ont pas encore été reçues : on les lit dans la salle puis on relance le suivi
+    _fbDB.collection('rooms').doc(S.guestSession.code).get().then(function(d){
+      var rd=d.data()||{};
+      var list=(rd.perfSongs&&rd.perfSongs.length)?rd.perfSongs:(rd.songs||[]);
+      if(list.length){S.guestSession.songs=list;handleLive(L);}
+      else{showToast('⚠️ Chansons de la session introuvables — rafraîchis la page');}
+    }).catch(function(){});
+    return;
+  }
   PF.follow=true;
   if(!S.inGuestPerf){
     startGuestPerf(L.si||0);
