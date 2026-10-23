@@ -940,6 +940,14 @@ startFirestoreSync();
 })();
 
 // -- UTILS --
+// -- Copie la session affichée dans la salle : les visiteurs écoutent rooms/{code} --
+function mirrorRoomSession(){
+  if(S.mode!=='admin'||!_fbAuth.currentUser||!S.roomCode)return;
+  var idx=S.displayedSession!==undefined?S.displayedSession:S.activeSession;
+  var sl_i=(idx===S.activeSession)?S.setlist:(S.sessions[idx]?S.sessions[idx].setlist:[]);
+  var sessionSongs=sl_i.map(function(id){return S.songs.find(function(sg){return sg.id===id;});}).filter(Boolean);
+  _fbDB.collection('rooms').doc(S.roomCode).set({songs:sessionSongs,setlist:sl_i,displayedSession:idx},{merge:true}).catch(function(){});
+}
 function save(){
   try{localStorage.setItem(SK,JSON.stringify(S.songs));}catch(e){}
   if(S.mode==='admin'&&_fbAuth.currentUser){
@@ -953,6 +961,7 @@ function save(){
       roomCode:S.roomCode||'',
       updatedAt:firebase.firestore.FieldValue.serverTimestamp()
     }).catch(function(e){console.warn('Firestore save err:',e);});
+    mirrorRoomSession();
   }
 }
 function saveSL(){
@@ -971,6 +980,7 @@ function saveSL(){
       freeHours:S.freeHours||3,
       updatedAt:firebase.firestore.FieldValue.serverTimestamp()
     }).catch(function(e){console.warn('Firestore saveSL err:',e);});
+    mirrorRoomSession();
   }
 }
 function cc(chord){return CC[chord.replace(/[^A-G]/g,'').charAt(0)]||'#BD9466';}
