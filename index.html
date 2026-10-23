@@ -171,7 +171,7 @@
     }
 
     /* ============================================================
-       ERGONOMIE MOBILE v9 — MYOPIE FRIENDLY
+       ERGONOMIE MOBILE v10 — MYOPIE FRIENDLY
        Tailles +30% et contrastes remontes (rgba 0.35 → 0.75).
        ============================================================ */
 
@@ -599,7 +599,7 @@ function getTempoRate(t){return TEMPO_RATE[t]||1.0;}
 
 // -- PERFORMANCE ENGINE STATE (not serialized) --
 var PF={
-  timer:null, elapsed:0, startRef:0,
+  timer:null, elapsed:0, startRef:0, liveId:'', followId:'', follow:false, hb:null,
   playing:false, autoAdvance:true,
   words:[], idx:-1, totalDur:0,
   countTimer:null, karaokeOn:false
@@ -874,10 +874,11 @@ function startFirestoreSync(){
         showToast('🎸 Session lancée — chansons débloquées !');
       }
       // isActive && wasActive : admin fait Suivant/Precedent/Pause/etc.
-      //   → AUCUNE action, le visiteur reste totalement independant.
+      //   → le suivi en direct (handleLive) prend le relais.
       // !isActive : admin arrete la perf → le visiteur reste sur son ecran.
       S._lastPerfActive=isActive;
     }
+    if(S.mode!=='admin')handleLive(data.live);
     // Re-render seulement si contenu vraiment changé
     if(changed){
       render();
@@ -1201,10 +1202,11 @@ function startPerfTimer(){
   PF.startRef=Date.now()-PF.elapsed*1000;
   PF.playing=true;
   refreshPerfPlayBtn();
+  syncLive(true);
   PF.timer=setInterval(function(){
     PF.elapsed=(Date.now()-PF.startRef)/1000;
     updatePerfKaraoke(PF.elapsed);
-    if(PF.autoAdvance&&PF.elapsed>=PF.totalDur){
+    if(PF.autoAdvance&&!PF.follow&&PF.elapsed>=PF.totalDur){
       stopPerfTimer();
       var lastIdx=S.inGuestPerf?(S.guestPerfSongs.length-1):(S.setlist.length-1);
       if(gPerfIdx()<lastIdx){launchCountdown();}
@@ -1216,6 +1218,7 @@ function stopPerfTimer(){
   if(PF.timer){clearInterval(PF.timer);PF.timer=null;}
   PF.playing=false;
   refreshPerfPlayBtn();
+  syncLive(true);
 }
 function togglePerfPlay(){
   if(PF.playing){stopPerfTimer();}else{startPerfTimer();}
@@ -1378,6 +1381,7 @@ function loadPerfSong(autoStart){
   refreshPerfNextBtn();
 
   if(autoStart)startPerfTimer();
+  else syncLive(true);
 }
 
 // -- GUEST PERF HELPERS --
@@ -1425,6 +1429,7 @@ function startPerf(){
   }
   // 2. Ouvrir la performance admin directement
   S.perfIndex=0; PF.elapsed=0; PF.idx=-1; PF.words=[]; S.transposeOffset=0;
+  PF.liveId=String(Date.now()); liveHeartbeatOn();
   if(PF.countTimer){clearTimeout(PF.countTimer);PF.countTimer=null;}
   var ov=document.getElementById('perf-overlay');
   if(ov)ov.classList.remove('show');
@@ -1511,7 +1516,8 @@ function exitPerf(){
   if(S.inGuestPerf){S.guestPerfDismissed=true;}
   S.inGuestPerf=false; S.guestPerfSongs=[]; S.guestPerfIndex=0; S.transposeOffset=0;
   // Si admin → signale fin de perf aux visiteurs
-  if(S.mode==='admin')syncPerfState(false);
+  if(S.mode==='admin'){syncPerfState(false);liveHeartbeatOff();syncLive(false);}
+  PF.follow=false;
 }
 
 // -- TRANSPOSITION EN MODE PERFORMANCE (admin only) --
@@ -1550,6 +1556,51 @@ function perfTransposeReset(){
 }
 
 // -- SYNC ÉTAT PERFORMANCE VERS VISITEURS --
+// -- SYNC EN DIRECT : l'admin mène, les visiteurs suivent (départ, morceau, pause, arrêt) --
+function syncLive(on){
+  if(S.mode!=='admin'||!S.roomCode||!_fbAuth.currentUser)return;
+  _fbDB.collection('rooms').doc(S.roomCode).update({
+    live:{on:on,id:PF.liveId,si:S.perfIndex,t:Math.round(PF.elapsed*10)/10,playing:!!(on&&PF.playing),at:Date.now()}
+  }).catch(function(){});
+}
+function liveHeartbeatOn(){
+  liveHeartbeatOff();
+  PF.hb=setInterval(function(){syncLive(true);},2500);
+}
+function liveHeartbeatOff(){
+  if(PF.hb){clearInterval(PF.hb);PF.hb=null;}
+}
+// -- VISITEUR : suit l'admin en direct --
+function handleLive(L){
+  if(!L||!S.guestSession)return;
+  if(!L.on){
+    if(S.inGuestPerf)followStop();
+    return;
+  }
+  if(L.id!==PF.followId){PF.followId=L.id;S.guestPerfDismissed=false;}
+  if(S.guestPerfDismissed)return;
+  PF.follow=true;
+  if(!S.inGuestPerf){
+    startGuestPerf(L.si||0);
+    if(!S.inGuestPerf)return;
+  }
+  if(S.guestPerfIndex!==L.si){S.guestPerfIndex=L.si;loadPerfSong(false);}
+  var target=L.t||0;
+  if(L.playing){
+    if(!PF.playing||Math.abs(PF.elapsed-target)>0.5){PF.elapsed=target;startPerfTimer();}
+  }else{
+    stopPerfTimer();PF.elapsed=target;updatePerfKaraoke(target);
+  }
+}
+function followStop(){
+  stopPerfTimer();
+  if(PF.countTimer){clearTimeout(PF.countTimer);PF.countTimer=null;}
+  var ov=document.getElementById('perf-overlay');
+  if(ov)ov.classList.remove('show');
+  document.getElementById('perf-mode').classList.remove('show');
+  PF.follow=false;
+  S.inGuestPerf=false; S.guestPerfSongs=[]; S.guestPerfIndex=0;
+}
 function syncPerfState(active){
   if(!_fbAuth.currentUser)return;
   // Construire les chansons dans l'ordre de la setlist (crucial pour sync visiteur)
